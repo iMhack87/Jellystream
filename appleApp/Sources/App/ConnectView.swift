@@ -42,7 +42,8 @@ final class AppModel: ObservableObject {
     }
 
     func logout() {
-        api.logout()
+        // Best-effort server revocation; local state clears now
+        Task { [api] in try? await api.logout() }
         SessionStore.clear()
         session = nil
     }

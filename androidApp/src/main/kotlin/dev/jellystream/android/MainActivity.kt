@@ -116,6 +116,7 @@ private fun JellystreamApp() {
     var session by remember { mutableStateOf(persisted?.session) }
     var playing by remember { mutableStateOf<BaseItem?>(null) }
     val backStack = remember { mutableStateListOf<Screen>(Screen.Home) }
+    val scope = rememberCoroutineScope()
 
     fun open(item: BaseItem) {
         when {
@@ -142,7 +143,8 @@ private fun JellystreamApp() {
                     onOpen = ::open,
                     onSearch = { backStack.add(Screen.Search) },
                     onLogout = {
-                        api.logout()
+                        // Best-effort server revocation; local state clears now
+                        scope.launch { runCatching { api.logout() } }
                         store.clear()
                         backStack.clear()
                         backStack.add(Screen.Home)

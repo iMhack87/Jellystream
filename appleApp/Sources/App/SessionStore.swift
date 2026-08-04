@@ -18,10 +18,16 @@ enum SessionStore {
 
     static func save(_ persisted: PersistedSession) {
         let json = persisted.toJson()
-        // Keychain first; unsigned dev builds (simulator, CODE_SIGNING_ALLOWED=NO)
-        // get errSecMissingEntitlement — fall back to UserDefaults there
-        if !keychainSave(json) {
+        if keychainSave(json) {
+            // A stale fallback copy must not outlive a successful Keychain save
+            UserDefaults.standard.removeObject(forKey: defaultsKey)
+        } else {
+            // Unsigned simulator builds (CODE_SIGNING_ALLOWED=NO) get
+            // errSecMissingEntitlement from the Keychain — dev-only fallback.
+            // Signed device builds never take this path.
+            #if targetEnvironment(simulator)
             UserDefaults.standard.set(json, forKey: defaultsKey)
+            #endif
         }
     }
 
@@ -54,7 +60,7 @@ enum SessionStore {
         SecItemDelete(baseQuery() as CFDictionary)
         var attributes = baseQuery()
         attributes[kSecValueData as String] = data
-        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         return SecItemAdd(attributes as CFDictionary, nil) == errSecSuccess
     }
 }

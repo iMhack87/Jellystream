@@ -60,6 +60,10 @@ final class PlayerModel: ObservableObject {
         mpv_set_option_string(handle, "gpu-api", "vulkan")
         mpv_set_option_string(handle, "hwdec", "videotoolbox")
         mpv_set_option_string(handle, "keep-open", "yes")
+        // Token travels as a header, never in the URL (proxy/player logs)
+        if let auth = api.streamAuthorizationHeader() {
+            mpv_set_option_string(handle, "http-header-fields", "Authorization: \(auth)")
+        }
 
         let resume = item.resumePositionSeconds
         if resume > 1 {
