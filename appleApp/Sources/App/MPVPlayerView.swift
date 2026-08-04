@@ -104,8 +104,8 @@ final class PlayerModel: ObservableObject {
                 // point (StartTimeTicks); seeking again would double-apply
                 // it. Same guard as the Android player.
                 self.setString("start", "none")
-                self.positionOffset = self.item.resumePositionSeconds
             }
+            self.positionOffset = plan?.startOffsetSeconds ?? 0
             self.command("loadfile", url)
             for subtitle in plan?.externalSubtitles ?? [] {
                 self.command("sub-add", subtitle.url, "auto")
@@ -329,8 +329,15 @@ struct PlayerScreen: View {
             #endif
 
             // Apple TV+-style timed skip pill: appears when playback enters
-            // an Intro/Outro segment, gone when the segment ends
-            if let segment = model.skipSegment {
+            // an Intro/Outro segment, gone when the segment ends. On tvOS it
+            // yields to the track panel — one overlay owns the Focus Engine
+            // at a time (same discipline as .focusable(!showTracks)).
+            #if os(tvOS)
+            let skipPillHidden = showTracks
+            #else
+            let skipPillHidden = false
+            #endif
+            if let segment = model.skipSegment, !skipPillHidden {
                 VStack {
                     Spacer()
                     HStack {
@@ -388,9 +395,16 @@ struct PlayerScreen: View {
             }
         }
         // The pill grabs focus on appear so one center press skips; when it
-        // leaves, focus falls back to the player view (arrows seek again)
+        // leaves, focus falls back to the player view (arrows seek again).
+        // Never steal focus while the track panel is open — the pill is
+        // hidden then, and re-grabs when the panel closes mid-segment.
         .onChange(of: model.skipSegment == nil) { _, isNil in
-            skipFocused = !isNil
+            skipFocused = !isNil && !showTracks
+        }
+        .onChange(of: showTracks) { _, open in
+            if !open && model.skipSegment != nil {
+                skipFocused = true
+            }
         }
         #endif
         .onDisappear { model.shutdown() }

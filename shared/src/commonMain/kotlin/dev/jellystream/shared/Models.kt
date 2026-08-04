@@ -181,6 +181,13 @@ data class PlaybackPlan(
     val externalSubtitles: List<ExternalSubtitle>,
     /** Identifies the transcode job so Stopped can terminate it server-side. */
     val playSessionId: String? = null,
+    /**
+     * Where the stream's clock starts within the media, in seconds. A
+     * transcode window opens at the resume point (StartTimeTicks), so the
+     * player's position is window-relative; media time = player position +
+     * this offset. 0 for Direct Play, where the clock is absolute.
+     */
+    val startOffsetSeconds: Double = 0.0,
 )
 
 @Serializable

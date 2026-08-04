@@ -321,6 +321,7 @@ class JellyfinApi(
                 isTranscode = true,
                 externalSubtitles = subtitles,
                 playSessionId = info.playSessionId,
+                startOffsetSeconds = startTicks / TICKS_PER_SECOND.toDouble(),
             )
         } else {
             val mediaSourceParam = source.id?.let { "&mediaSourceId=$it" } ?: ""

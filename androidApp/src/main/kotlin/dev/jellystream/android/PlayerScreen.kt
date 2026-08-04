@@ -146,9 +146,9 @@ private fun PlayerSurface(
 ) {
     val context = LocalContext.current
 
-    // An HLS transcode starts at the resume point (StartTimeTicks), so the
-    // player clock is window-relative; segments are in media time
-    val positionOffsetSeconds = if (plan.isTranscode) item.resumePositionSeconds else 0.0
+    // Segments are in media time; the plan says where the stream clock
+    // starts (transcode windows open at the resume point)
+    val positionOffsetSeconds = plan.startOffsetSeconds
 
     val player = remember {
         // Token travels as a header, never in the URL (proxy/player logs)
