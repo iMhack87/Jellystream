@@ -25,6 +25,12 @@ xcodebuild -project Jellystream.xcodeproj -scheme JellystreamTV -destination 'ge
 - Les arguments par défaut Kotlin ne sont pas exportés vers Swift : toute API du module `shared` appelée depuis Swift doit être invocable avec tous ses paramètres explicites.
 - Logique protocole Jellyfin (auth, headers `MediaBrowser`, décision Direct Play) : toujours dans `shared/`, jamais dans le code plateforme.
 
+## Vérification E2E (simulateur / émulateur)
+
+- Serveur de test public : `demo.jellyfin.org/stable`, utilisateur `demo`, sans mot de passe. Ne jamais saisir les identifiants du serveur personnel de Matthieu.
+- **Simulateur iOS** : l'hôte est en AZERTY → l'injection `text` sort du charabia. Avant de taper : `xcrun simctl spawn <udid> defaults write .GlobalPreferences AppleKeyboards -array "en_US@sw=QWERTY;hw=Automatic"` puis redémarrer le simulateur.
+- **Émulateur Android** : les taps par coordonnées cassent dès que le clavier s'ouvre (le layout remonte, `safeDrawingPadding` inclut l'IME). Fiable : tap sur le 1er champ, puis `input keyevent 61` (TAB) pour passer au champ suivant, `KEYCODE_BACK` pour fermer le clavier avant de taper un bouton. L'autocorrect peut réécrire le texte ("demo"→"demon ") : toujours vérifier par capture avant de valider.
+
 ## Déploiement
 
 Aucun pour l'instant (pas de store, pas de CI). Merge sur `main` uniquement via PR approuvée par Matthieu.

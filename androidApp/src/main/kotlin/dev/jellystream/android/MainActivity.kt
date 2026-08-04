@@ -6,10 +6,18 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -18,6 +26,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -25,9 +34,15 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
+import dev.jellystream.shared.BaseItem
 import dev.jellystream.shared.JellyfinApi
+import dev.jellystream.shared.UserSession
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -37,34 +52,42 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    ConnectScreen()
+                    // Keep content clear of the status bar / display cutout (edge-to-edge)
+                    androidx.compose.foundation.layout.Box(
+                        modifier = Modifier.safeDrawingPadding()
+                    ) {
+                        JellystreamApp()
+                    }
                 }
             }
         }
     }
 }
 
-private sealed interface ConnectState {
-    data object Idle : ConnectState
-    data object Loading : ConnectState
-    data class Success(val message: String) : ConnectState
-    data class Error(val message: String) : ConnectState
-}
-
 @Composable
-private fun ConnectScreen() {
+private fun JellystreamApp() {
     val api = remember {
         JellyfinApi(
             deviceName = Build.MODEL,
             deviceId = UUID.randomUUID().toString(),
         )
     }
-    val scope = rememberCoroutineScope()
+    var session by remember { mutableStateOf<UserSession?>(null) }
 
+    when (val s = session) {
+        null -> LoginScreen(api, onLoggedIn = { session = it })
+        else -> HomeScreen(api, s)
+    }
+}
+
+@Composable
+private fun LoginScreen(api: JellyfinApi, onLoggedIn: (UserSession) -> Unit) {
+    val scope = rememberCoroutineScope()
     var serverUrl by remember { mutableStateOf("") }
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var state by remember { mutableStateOf<ConnectState>(ConnectState.Idle) }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
@@ -98,19 +121,17 @@ private fun ConnectScreen() {
         )
 
         Button(
-            enabled = state != ConnectState.Loading && serverUrl.isNotBlank(),
+            enabled = !loading && serverUrl.isNotBlank(),
             onClick = {
                 scope.launch {
-                    state = ConnectState.Loading
-                    state = try {
-                        val server = api.resolveServer(serverUrl)
-                        val auth = api.authenticateByName(server.baseUrl, username, password)
-                        ConnectState.Success(
-                            "Connected to ${server.info.serverName ?: "Jellyfin"} " +
-                                "(v${server.info.version ?: "?"}) as ${auth.user?.name ?: username}"
-                        )
+                    loading = true
+                    error = null
+                    try {
+                        onLoggedIn(api.login(serverUrl, username, password))
                     } catch (e: Exception) {
-                        ConnectState.Error(e.message ?: "Connection failed")
+                        error = e.message ?: "Connection failed"
+                    } finally {
+                        loading = false
                     }
                 }
             },
@@ -118,11 +139,98 @@ private fun ConnectScreen() {
             Text("Connect")
         }
 
-        when (val s = state) {
-            is ConnectState.Loading -> CircularProgressIndicator()
-            is ConnectState.Success -> Text(s.message, color = MaterialTheme.colorScheme.primary)
-            is ConnectState.Error -> Text(s.message, color = MaterialTheme.colorScheme.error)
-            ConnectState.Idle -> {}
+        if (loading) CircularProgressIndicator()
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    }
+}
+
+private data class LibrarySection(val view: BaseItem, val latest: List<BaseItem>)
+
+@Composable
+private fun HomeScreen(api: JellyfinApi, session: UserSession) {
+    var sections by remember { mutableStateOf<List<LibrarySection>?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(session) {
+        try {
+            sections = api.getUserViews().map { view ->
+                LibrarySection(view, api.getLatestItems(view.id, 12))
+            }
+        } catch (e: Exception) {
+            error = e.message ?: "Failed to load library"
         }
+    }
+
+    when {
+        error != null -> Column(
+            modifier = Modifier.fillMaxSize().padding(24.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(error!!, color = MaterialTheme.colorScheme.error)
+        }
+        sections == null -> Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            CircularProgressIndicator()
+        }
+        else -> LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(24.dp),
+        ) {
+            item {
+                Text(
+                    session.serverName ?: "Jellyfin",
+                    style = MaterialTheme.typography.headlineMedium,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+            }
+            items(sections!!, key = { it.view.id }) { section ->
+                LibraryRow(api, section)
+            }
+        }
+    }
+}
+
+@Composable
+private fun LibraryRow(api: JellyfinApi, section: LibrarySection) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            section.view.name ?: "Library",
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            items(section.latest, key = { it.id }) { item ->
+                PosterCard(api, item)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PosterCard(api: JellyfinApi, item: BaseItem) {
+    Column(modifier = Modifier.width(120.dp)) {
+        AsyncImage(
+            model = api.imageUrl(item, 400),
+            contentDescription = item.name,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .width(120.dp)
+                .height(180.dp)
+                .clip(RoundedCornerShape(8.dp)),
+        )
+        Text(
+            item.name ?: "",
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }

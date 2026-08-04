@@ -4,7 +4,7 @@ import SwiftUI
 struct JellystreamApp: App {
     var body: some Scene {
         WindowGroup {
-            ConnectView()
+            RootView()
         }
     }
 }

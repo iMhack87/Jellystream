@@ -30,6 +30,32 @@ data class ResolvedServer(
     val info: PublicSystemInfo,
 )
 
+/** An authenticated session against one server. */
+data class UserSession(
+    val baseUrl: String,
+    val userId: String,
+    val accessToken: String,
+    val userName: String?,
+    val serverName: String?,
+)
+
+@Serializable
+data class BaseItem(
+    @SerialName("Id") val id: String,
+    @SerialName("Name") val name: String? = null,
+    @SerialName("Type") val type: String? = null,
+    @SerialName("CollectionType") val collectionType: String? = null,
+    @SerialName("ProductionYear") val productionYear: Int? = null,
+    @SerialName("ImageTags") val imageTags: Map<String, String>? = null,
+    @SerialName("SeriesName") val seriesName: String? = null,
+)
+
+@Serializable
+data class ItemsResult(
+    @SerialName("Items") val items: List<BaseItem> = emptyList(),
+    @SerialName("TotalRecordCount") val totalRecordCount: Int? = null,
+)
+
 @Serializable
 internal data class AuthenticateByNameRequest(
     @SerialName("Username") val username: String,
