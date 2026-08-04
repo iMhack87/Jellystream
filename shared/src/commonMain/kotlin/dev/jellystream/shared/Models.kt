@@ -55,7 +55,14 @@ data class BaseItem(
     @SerialName("ProductionYear") val productionYear: Int? = null,
     @SerialName("ImageTags") val imageTags: Map<String, String>? = null,
     @SerialName("SeriesName") val seriesName: String? = null,
+    @SerialName("SeriesId") val seriesId: String? = null,
     @SerialName("UserData") val userData: UserItemData? = null,
+    @SerialName("Overview") val overview: String? = null,
+    @SerialName("RunTimeTicks") val runTimeTicks: Long? = null,
+    @SerialName("Genres") val genres: List<String>? = null,
+    @SerialName("CommunityRating") val communityRating: Double? = null,
+    @SerialName("IndexNumber") val indexNumber: Int? = null,
+    @SerialName("ParentIndexNumber") val parentIndexNumber: Int? = null,
 ) {
     /** Direct playback targets — the single source of truth for both platforms. */
     val isPlayable: Boolean
@@ -64,6 +71,24 @@ data class BaseItem(
     /** Resume position in seconds, 0.0 when unwatched. */
     val resumePositionSeconds: Double
         get() = (userData?.playbackPositionTicks ?: 0L) / 10_000_000.0
+
+    val isSeries: Boolean
+        get() = type == "Series"
+
+    /** Whole minutes, null when the server didn't send a runtime. */
+    val runtimeMinutes: Int?
+        get() = runTimeTicks?.let { (it / (60 * JellyfinApi.TICKS_PER_SECOND)).toInt() }
+
+    /** "S2 · E5" style label for episodes, null otherwise. */
+    val episodeLabel: String?
+        get() = if (type == "Episode" && indexNumber != null) {
+            buildString {
+                parentIndexNumber?.let { append("S$it · ") }
+                append("E$indexNumber")
+            }
+        } else {
+            null
+        }
 }
 
 @Serializable

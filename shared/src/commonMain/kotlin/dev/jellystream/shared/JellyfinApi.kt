@@ -107,6 +107,74 @@ class JellyfinApi(
         }.body()
     }
 
+    /** In-progress items — the "Continue watching" row. */
+    suspend fun getResumeItems(limit: Int = 12): List<BaseItem> {
+        val s = requireSession()
+        return authGet<ItemsResult>(
+            "Users/${s.userId}/Items/Resume",
+            "limit" to limit.toString(),
+            "mediaTypes" to "Video",
+        ).items
+    }
+
+    /** Next unwatched episodes of followed shows — the "Next up" row. */
+    suspend fun getNextUp(limit: Int = 12): List<BaseItem> {
+        val s = requireSession()
+        return authGet<ItemsResult>(
+            "Shows/NextUp",
+            "userId" to s.userId,
+            "limit" to limit.toString(),
+        ).items
+    }
+
+    /** Full item details (overview, runtime, genres, …). */
+    suspend fun getItem(itemId: String): BaseItem {
+        val s = requireSession()
+        return authGet("Users/${s.userId}/Items/$itemId")
+    }
+
+    suspend fun getSeasons(seriesId: String): List<BaseItem> {
+        val s = requireSession()
+        return authGet<ItemsResult>(
+            "Shows/$seriesId/Seasons",
+            "userId" to s.userId,
+        ).items
+    }
+
+    /** Episodes of a series, optionally restricted to one season. */
+    suspend fun getEpisodes(seriesId: String, seasonId: String?): List<BaseItem> {
+        val s = requireSession()
+        val params = mutableListOf("userId" to s.userId)
+        if (seasonId != null) params.add("seasonId" to seasonId)
+        return authGet<ItemsResult>(
+            "Shows/$seriesId/Episodes",
+            *params.toTypedArray(),
+        ).items
+    }
+
+    suspend fun search(query: String, limit: Int = 24): List<BaseItem> {
+        val s = requireSession()
+        return authGet<ItemsResult>(
+            "Items",
+            "userId" to s.userId,
+            "searchTerm" to query,
+            "recursive" to "true",
+            "includeItemTypes" to "Movie,Series,Episode",
+            "limit" to limit.toString(),
+        ).items
+    }
+
+    private suspend inline fun <reified T> authGet(
+        path: String,
+        vararg params: Pair<String, String>,
+    ): T {
+        val s = requireSession()
+        return http.get("${s.baseUrl}/$path") {
+            params.forEach { url.parameters.append(it.first, it.second) }
+            header("Authorization", authorizationHeader(s.accessToken))
+        }.body()
+    }
+
     /**
      * Direct-stream URL for a playable item: the original file, container and
      * all, served as-is (`static=true`) — the player does the work, not the

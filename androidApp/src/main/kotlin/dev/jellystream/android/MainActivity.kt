@@ -3,24 +3,31 @@ package dev.jellystream.android
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -29,6 +36,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -55,15 +63,20 @@ class MainActivity : ComponentActivity() {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     // Keep content clear of status bar, cutout AND keyboard (IME):
                     // the centered login form deliberately shifts up when typing
-                    androidx.compose.foundation.layout.Box(
-                        modifier = Modifier.safeDrawingPadding()
-                    ) {
+                    Box(modifier = Modifier.safeDrawingPadding()) {
                         JellystreamApp()
                     }
                 }
             }
         }
     }
+}
+
+private sealed interface Screen {
+    data object Home : Screen
+    data class Detail(val item: BaseItem) : Screen
+    data class Series(val item: BaseItem) : Screen
+    data object Search : Screen
 }
 
 @Composable
@@ -76,13 +89,36 @@ private fun JellystreamApp() {
     }
     var session by remember { mutableStateOf<UserSession?>(null) }
     var playing by remember { mutableStateOf<BaseItem?>(null) }
+    val backStack = remember { mutableStateListOf<Screen>(Screen.Home) }
+
+    fun open(item: BaseItem) {
+        when {
+            item.isSeries -> backStack.add(Screen.Series(item))
+            item.isPlayable -> backStack.add(Screen.Detail(item))
+        }
+    }
 
     when (val s = session) {
         null -> LoginScreen(api, onLoggedIn = { session = it })
-        // The player is an overlay: HomeScreen stays composed underneath so its
-        // state (loaded sections) survives closing the player
-        else -> androidx.compose.foundation.layout.Box {
-            HomeScreen(api, s, onPlay = { playing = it })
+        // The player is an overlay: the navigation stack stays composed
+        // underneath so its state survives closing the player
+        else -> Box {
+            when (val screen = backStack.last()) {
+                Screen.Home -> HomeScreen(
+                    api = api,
+                    session = s,
+                    onOpen = ::open,
+                    onSearch = { backStack.add(Screen.Search) },
+                )
+                is Screen.Detail -> DetailScreen(api, screen.item, onPlay = { playing = it })
+                is Screen.Series -> SeriesScreen(api, screen.item, onPlay = { playing = it })
+                Screen.Search -> SearchScreen(api, onOpen = ::open)
+            }
+
+            BackHandler(enabled = backStack.size > 1 && playing == null) {
+                backStack.removeAt(backStack.lastIndex)
+            }
+
             playing?.let { item ->
                 PlayerScreen(api, item, onClose = { playing = null })
             }
@@ -154,24 +190,34 @@ private fun LoginScreen(api: JellyfinApi, onLoggedIn: (UserSession) -> Unit) {
     }
 }
 
-private data class LibrarySection(val view: BaseItem, val latest: List<BaseItem>)
+private data class LibrarySection(val title: String, val key: String, val items: List<BaseItem>)
 
 @Composable
-private fun HomeScreen(api: JellyfinApi, session: UserSession, onPlay: (BaseItem) -> Unit) {
+private fun HomeScreen(
+    api: JellyfinApi,
+    session: UserSession,
+    onOpen: (BaseItem) -> Unit,
+    onSearch: () -> Unit,
+) {
     var sections by remember { mutableStateOf<List<LibrarySection>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(session) {
         try {
-            sections = api.getUserViews().map { view ->
+            val result = mutableListOf<LibrarySection>()
+            runCatching { api.getResumeItems(12) }.getOrDefault(emptyList())
+                .takeIf { it.isNotEmpty() }
+                ?.let { result.add(LibrarySection("Continue Watching", "resume", it)) }
+            runCatching { api.getNextUp(12) }.getOrDefault(emptyList())
+                .takeIf { it.isNotEmpty() }
+                ?.let { result.add(LibrarySection("Next Up", "nextup", it)) }
+            api.getUserViews().forEach { view ->
                 // One failing view must not blank the whole home screen
-                val latest = try {
-                    api.getLatestItems(view.id, 12)
-                } catch (e: Exception) {
-                    emptyList()
-                }
-                LibrarySection(view, latest)
+                val latest = runCatching { api.getLatestItems(view.id, 12) }
+                    .getOrDefault(emptyList())
+                result.add(LibrarySection(view.name ?: "Library", view.id, latest))
             }
+            sections = result
         } catch (e: Exception) {
             error = e.message ?: "Failed to load library"
         }
@@ -198,24 +244,32 @@ private fun HomeScreen(api: JellyfinApi, session: UserSession, onPlay: (BaseItem
             verticalArrangement = Arrangement.spacedBy(24.dp),
         ) {
             item {
-                Text(
-                    session.serverName ?: "Jellyfin",
-                    style = MaterialTheme.typography.headlineMedium,
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        session.serverName ?: "Jellyfin",
+                        style = MaterialTheme.typography.headlineMedium,
+                    )
+                    IconButton(onClick = onSearch) {
+                        Icon(Icons.Default.Search, contentDescription = "Search")
+                    }
+                }
             }
-            items(sections!!, key = { it.view.id }) { section ->
-                LibraryRow(api, section, onPlay)
+            items(sections!!, key = { it.key }) { section ->
+                LibraryRow(api, section, onOpen)
             }
         }
     }
 }
 
 @Composable
-private fun LibraryRow(api: JellyfinApi, section: LibrarySection, onPlay: (BaseItem) -> Unit) {
+private fun LibraryRow(api: JellyfinApi, section: LibrarySection, onOpen: (BaseItem) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
-            section.view.name ?: "Library",
+            section.title,
             style = MaterialTheme.typography.titleLarge,
             modifier = Modifier.padding(horizontal = 16.dp),
         )
@@ -223,19 +277,19 @@ private fun LibraryRow(api: JellyfinApi, section: LibrarySection, onPlay: (BaseI
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            items(section.latest, key = { it.id }) { item ->
-                PosterCard(api, item, onPlay)
+            items(section.items, key = { it.id }) { item ->
+                PosterCard(api, item, onOpen)
             }
         }
     }
 }
 
 @Composable
-private fun PosterCard(api: JellyfinApi, item: BaseItem, onPlay: (BaseItem) -> Unit) {
+private fun PosterCard(api: JellyfinApi, item: BaseItem, onOpen: (BaseItem) -> Unit) {
     Column(
         modifier = Modifier
             .width(120.dp)
-            .clickable(enabled = item.isPlayable) { onPlay(item) },
+            .clickable(enabled = item.isPlayable || item.isSeries) { onOpen(item) },
     ) {
         AsyncImage(
             model = api.imageUrl(item, 400),
