@@ -289,7 +289,10 @@ private fun HomeScreen(
             CircularProgressIndicator()
         }
         else -> {
-            val hero = sections!!.firstOrNull { it.items.isNotEmpty() }?.items?.firstOrNull()
+            // Hero must be openable: first playable item or series across sections
+            val hero = sections!!.asSequence()
+                .flatMap { it.items }
+                .firstOrNull { it.isPlayable || it.isSeries }
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 32.dp),
@@ -403,17 +406,19 @@ private fun HeroSection(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Button(
-                        onClick = { onPlay(item) },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color.White,
-                            contentColor = Color.Black,
-                        ),
-                        shape = RoundedCornerShape(10.dp),
-                    ) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = null)
-                        Spacer(Modifier.width(6.dp))
-                        Text(if (item.resumePositionSeconds > 60) "Resume" else "Play")
+                    if (item.isPlayable) {
+                        Button(
+                            onClick = { onPlay(item) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color.White,
+                                contentColor = Color.Black,
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null)
+                            Spacer(Modifier.width(6.dp))
+                            Text(if (item.resumePositionSeconds > 60) "Resume" else "Play")
+                        }
                     }
                     Text(
                         "Details",

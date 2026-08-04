@@ -26,7 +26,9 @@ struct HomeView: View {
                 } else if let sections {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 36) {
-                            if let hero = sections.first(where: { !$0.items.isEmpty })?.items.first {
+                            // Hero must be openable: first playable item or series
+                            if let hero = sections.flatMap(\.items)
+                                .first(where: { $0.isPlayable || $0.isSeries }) {
                                 HeroSection(api: api, item: hero) {
                                     playingItem = hero
                                 }
@@ -155,20 +157,22 @@ private struct HeroSection: View {
                 let ctaSpacing: CGFloat = 14
                 #endif
                 HStack(spacing: ctaSpacing) {
-                    Button(action: onPlay) {
-                        Label(
-                            item.resumePositionSeconds > 60 ? "Resume" : "Play",
-                            systemImage: "play.fill"
-                        )
-                        .font(.headline)
-                        #if !os(tvOS)
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 10)
-                        .background(.white, in: RoundedRectangle(cornerRadius: 10))
-                        .foregroundStyle(.black)
-                        #endif
+                    if item.isPlayable {
+                        Button(action: onPlay) {
+                            Label(
+                                item.resumePositionSeconds > 60 ? "Resume" : "Play",
+                                systemImage: "play.fill"
+                            )
+                            .font(.headline)
+                            #if !os(tvOS)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 10)
+                            .background(.white, in: RoundedRectangle(cornerRadius: 10))
+                            .foregroundStyle(.black)
+                            #endif
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
 
                     NavigationLink(value: item) {
                         Text("Details")
