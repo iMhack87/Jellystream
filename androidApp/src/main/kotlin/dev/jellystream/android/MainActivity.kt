@@ -62,6 +62,8 @@ import dev.jellystream.shared.BaseItem
 import dev.jellystream.shared.JellyfinApi
 import dev.jellystream.shared.PersistedSession
 import dev.jellystream.shared.UserSession
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -182,6 +184,7 @@ private fun LoginScreen(api: JellyfinApi, onLoggedIn: (UserSession) -> Unit) {
     var password by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var quickConnectCode by remember { mutableStateOf<String?>(null) }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
@@ -229,8 +232,64 @@ private fun LoginScreen(api: JellyfinApi, onLoggedIn: (UserSession) -> Unit) {
                     }
                 }
             },
+            modifier = Modifier.dpadFocusEffect(RoundedCornerShape(10.dp)),
         ) {
             Text("Connect")
+        }
+
+        // Quick Connect: no on-screen keyboard needed for username/password
+        Text(
+            "Use Quick Connect",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier
+                .dpadFocusEffect(RoundedCornerShape(10.dp))
+                .clip(RoundedCornerShape(10.dp))
+                .clickable(enabled = !loading && serverUrl.isNotBlank()) {
+                    scope.launch {
+                        loading = true
+                        error = null
+                        quickConnectCode = null
+                        try {
+                            val (baseUrl, initial) = api.initiateQuickConnect(serverUrl)
+                            quickConnectCode = initial.code
+                            var state = initial
+                            // Jellyfin codes expire (~5 min); stop polling
+                            // rather than hanging forever on a dead code
+                            val deadline = System.currentTimeMillis() + 5 * 60_000
+                            while (!state.authenticated) {
+                                if (System.currentTimeMillis() > deadline) {
+                                    error = "Quick Connect code expired — try again"
+                                    return@launch
+                                }
+                                delay(3_000)
+                                state = api.getQuickConnectState(baseUrl, initial.secret)
+                            }
+                            onLoggedIn(
+                                api.authenticateWithQuickConnect(baseUrl, initial.secret)
+                            )
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            error = e.message ?: "Quick Connect failed"
+                        } finally {
+                            loading = false
+                            quickConnectCode = null
+                        }
+                    }
+                }
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+        )
+
+        quickConnectCode?.let { code ->
+            Text(
+                code,
+                style = MaterialTheme.typography.headlineLarge,
+            )
+            Text(
+                "Enter this code in Jellyfin on your phone or browser",
+                style = MaterialTheme.typography.bodyMedium,
+                color = CinemaColors.TextSecondary,
+            )
         }
 
         if (loading) CircularProgressIndicator()

@@ -35,6 +35,8 @@ final class PlayerModel: ObservableObject {
     private var mpv: OpaquePointer?
     private var timer: Timer?
     private var tickCount = 0
+    /// Lets the server terminate the transcode job on Stopped.
+    private var playSessionId: String?
 
     init(api: JellyfinApi, item: BaseItem) {
         self.api = api
@@ -86,11 +88,15 @@ final class PlayerModel: ObservableObject {
                 self.shutdown()
                 return
             }
+            self.playSessionId = plan?.playSessionId
             self.command("loadfile", url)
             for subtitle in plan?.externalSubtitles ?? [] {
                 self.command("sub-add", subtitle.url, "auto")
             }
-            try? await self.api.reportPlaybackStart(itemId: self.item.id)
+            try? await self.api.reportPlaybackStart(
+                itemId: self.item.id,
+                playSessionId: plan?.playSessionId
+            )
         }
 
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
@@ -106,8 +112,12 @@ final class PlayerModel: ObservableObject {
         mpv = nil
         mpv_terminate_destroy(handle)
         // Fire-and-forget: the resume point must survive closing the player
-        Task { [api, item] in
-            try? await api.reportPlaybackStopped(itemId: item.id, positionTicks: finalTicks)
+        Task { [api, item, playSessionId] in
+            try? await api.reportPlaybackStopped(
+                itemId: item.id,
+                positionTicks: finalTicks,
+                playSessionId: playSessionId
+            )
         }
     }
 
@@ -155,11 +165,12 @@ final class PlayerModel: ObservableObject {
         if tickCount % 10 == 0 {
             let ticks = JellyfinApi.companion.secondsToTicks(seconds: timePos)
             let paused = isPaused
-            Task { [api, item] in
+            Task { [api, item, playSessionId] in
                 try? await api.reportPlaybackProgress(
                     itemId: item.id,
                     positionTicks: ticks,
-                    isPaused: paused
+                    isPaused: paused,
+                    playSessionId: playSessionId
                 )
             }
         }

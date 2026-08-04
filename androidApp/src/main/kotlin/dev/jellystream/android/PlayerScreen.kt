@@ -2,9 +2,14 @@ package dev.jellystream.android
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -17,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
@@ -49,6 +55,7 @@ private val playbackReportScope = CoroutineScope(SupervisorJob() + Dispatchers.I
 fun PlayerScreen(api: JellyfinApi, item: BaseItem, onClose: () -> Unit) {
     var plan by remember { mutableStateOf<PlaybackPlan?>(null) }
     var forceTranscode by remember { mutableStateOf(false) }
+    var failed by remember { mutableStateOf(false) }
 
     LaunchedEffect(item.id, forceTranscode) {
         plan = api.getPlaybackPlan(item, forceTranscode)
@@ -58,7 +65,18 @@ fun PlayerScreen(api: JellyfinApi, item: BaseItem, onClose: () -> Unit) {
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         val currentPlan = plan
-        if (currentPlan == null) {
+        if (failed) {
+            // Both Direct Play and the server transcode failed — say so
+            // instead of leaving a frozen black screen
+            Column(
+                modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text("This item could not be played", color = Color.White)
+                Button(onClick = onClose) { Text("Close") }
+            }
+        } else if (currentPlan == null) {
             CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
         } else {
             // key() tears the player down and rebuilds it when the plan
@@ -72,6 +90,8 @@ fun PlayerScreen(api: JellyfinApi, item: BaseItem, onClose: () -> Unit) {
                         if (!currentPlan.isTranscode && !forceTranscode) {
                             forceTranscode = true
                             plan = null
+                        } else {
+                            failed = true
                         }
                     },
                 )
@@ -119,6 +139,8 @@ private fun PlayerSurface(
                     .build()
                 setMediaItem(mediaItem)
                 prepare()
+                // A transcode already starts at the resume point server-side
+                // (StartTimeTicks); seeking again would double-apply it
                 val resumeMs = (item.resumePositionSeconds * 1000).toLong()
                 if (resumeMs > 0 && !plan.isTranscode) seekTo(resumeMs)
                 playWhenReady = true
@@ -132,7 +154,7 @@ private fun PlayerSurface(
 
     // Report start once, then position every 5 s while the screen is up
     LaunchedEffect(item.id) {
-        runCatching { api.reportPlaybackStart(item.id) }
+        runCatching { api.reportPlaybackStart(item.id, plan.playSessionId) }
         while (true) {
             delay(5_000)
             runCatching {
@@ -140,6 +162,7 @@ private fun PlayerSurface(
                     item.id,
                     JellyfinApi.millisecondsToTicks(player.currentPosition),
                     isPaused = !player.isPlaying,
+                    playSessionId = plan.playSessionId,
                 )
             }
         }
@@ -148,9 +171,11 @@ private fun PlayerSurface(
     DisposableEffect(Unit) {
         onDispose {
             val positionTicks = JellyfinApi.millisecondsToTicks(player.currentPosition)
+            val playSessionId = plan.playSessionId
             player.release()
             playbackReportScope.launch {
-                runCatching { api.reportPlaybackStopped(item.id, positionTicks) }
+                // PlaySessionId lets the server kill any transcode job
+                runCatching { api.reportPlaybackStopped(item.id, positionTicks, playSessionId) }
             }
         }
     }

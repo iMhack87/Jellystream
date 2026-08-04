@@ -129,6 +129,18 @@ data class BaseItem(
 }
 
 @Serializable
+data class QuickConnectState(
+    @SerialName("Secret") val secret: String,
+    @SerialName("Code") val code: String,
+    @SerialName("Authenticated") val authenticated: Boolean = false,
+)
+
+@Serializable
+internal data class QuickConnectAuthRequest(
+    @SerialName("Secret") val secret: String,
+)
+
+@Serializable
 data class MediaStream(
     @SerialName("Index") val index: Int? = null,
     @SerialName("Type") val type: String? = null,
@@ -167,6 +179,8 @@ data class PlaybackPlan(
     val url: String,
     val isTranscode: Boolean,
     val externalSubtitles: List<ExternalSubtitle>,
+    /** Identifies the transcode job so Stopped can terminate it server-side. */
+    val playSessionId: String? = null,
 )
 
 @Serializable
@@ -175,6 +189,7 @@ internal data class PlaybackReport(
     @SerialName("PositionTicks") val positionTicks: Long? = null,
     @SerialName("IsPaused") val isPaused: Boolean = false,
     @SerialName("PlayMethod") val playMethod: String = "DirectPlay",
+    @SerialName("PlaySessionId") val playSessionId: String? = null,
 )
 
 @Serializable

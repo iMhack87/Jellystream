@@ -120,6 +120,47 @@ class JellyfinApi(
         ).also { session = it }
     }
 
+    /**
+     * Quick Connect: the TV shows a code, the user approves it from a phone
+     * or the web UI, and the session lands here — no on-screen keyboard.
+     * Returns the initial state (code to display + secret to poll with).
+     */
+    suspend fun initiateQuickConnect(rawUrl: String): Pair<String, QuickConnectState> {
+        val server = resolveServer(rawUrl)
+        val state: QuickConnectState = http.post("${server.baseUrl}/QuickConnect/Initiate") {
+            header("Authorization", authorizationHeader(accessToken = null))
+        }.body()
+        return server.baseUrl to state
+    }
+
+    suspend fun getQuickConnectState(baseUrl: String, secret: String): QuickConnectState =
+        http.get("$baseUrl/QuickConnect/Connect") {
+            url.parameters.append("secret", secret)
+            header("Authorization", authorizationHeader(accessToken = null))
+        }.body()
+
+    /** Exchanges an approved Quick Connect secret for a real session. */
+    suspend fun authenticateWithQuickConnect(baseUrl: String, secret: String): UserSession {
+        val auth: AuthenticationResult =
+            http.post("$baseUrl/Users/AuthenticateWithQuickConnect") {
+                header("Authorization", authorizationHeader(accessToken = null))
+                contentType(ContentType.Application.Json)
+                setBody(QuickConnectAuthRequest(secret))
+            }.body()
+        val token = auth.accessToken
+            ?: throw IllegalStateException("Server did not return an access token")
+        val userId = auth.user?.id
+            ?: throw IllegalStateException("Server did not return a user id")
+        val info = runCatching { getPublicSystemInfo(baseUrl) }.getOrNull()
+        return UserSession(
+            baseUrl = baseUrl,
+            userId = userId,
+            accessToken = token,
+            userName = auth.user?.name,
+            serverName = info?.serverName,
+        ).also { session = it }
+    }
+
     /** The user's library views (Movies, Shows, …). Requires [login]. */
     suspend fun getUserViews(): List<BaseItem> {
         val s = requireSession()
@@ -232,11 +273,12 @@ class JellyfinApi(
             isTranscode = false,
             externalSubtitles = emptyList(),
         )
+        val startTicks = (item.resumePositionSeconds * TICKS_PER_SECOND).toLong()
         val info: PlaybackInfoResponse = try {
             http.post("${s.baseUrl}/Items/${item.id}/PlaybackInfo") {
                 header("Authorization", authorizationHeader(s.accessToken))
                 contentType(ContentType.Application.Json)
-                setBody(playbackInfoBody(s.userId, forceTranscode))
+                setBody(playbackInfoBody(s.userId, forceTranscode, startTicks))
             }.body()
         } catch (e: CancellationException) {
             throw e
@@ -250,7 +292,7 @@ class JellyfinApi(
             .filter { it.type == "Subtitle" && it.isExternal && it.deliveryUrl != null }
             .map {
                 ExternalSubtitle(
-                    url = "${s.baseUrl}${it.deliveryUrl}",
+                    url = joinUrl(s.baseUrl, it.deliveryUrl!!),
                     language = it.language,
                     title = it.displayTitle,
                     codec = it.codec,
@@ -260,9 +302,10 @@ class JellyfinApi(
         val transcodingUrl = source.transcodingUrl
         return if ((!source.supportsDirectPlay || forceTranscode) && transcodingUrl != null) {
             PlaybackPlan(
-                url = "${s.baseUrl}$transcodingUrl",
+                url = joinUrl(s.baseUrl, transcodingUrl),
                 isTranscode = true,
                 externalSubtitles = subtitles,
+                playSessionId = info.playSessionId,
             )
         } else {
             val mediaSourceParam = source.id?.let { "&mediaSourceId=$it" } ?: ""
@@ -270,20 +313,29 @@ class JellyfinApi(
                 url = "${s.baseUrl}/Videos/${item.id}/stream?static=true$mediaSourceParam",
                 isTranscode = false,
                 externalSubtitles = subtitles,
+                playSessionId = info.playSessionId,
             )
         }
     }
 
-    private fun playbackInfoBody(userId: String, forceTranscode: Boolean): JsonObject =
-        buildJsonObject {
-            put("UserId", userId)
-            put("AutoOpenLiveStream", false)
-            if (forceTranscode) {
-                put("EnableDirectPlay", false)
-                put("EnableDirectStream", false)
-            }
-            put("DeviceProfile", deviceProfile())
+    private fun joinUrl(baseUrl: String, path: String): String =
+        if (path.startsWith("/")) "$baseUrl$path" else "$baseUrl/$path"
+
+    private fun playbackInfoBody(
+        userId: String,
+        forceTranscode: Boolean,
+        startTimeTicks: Long,
+    ): JsonObject = buildJsonObject {
+        put("UserId", userId)
+        put("AutoOpenLiveStream", false)
+        // Lets the server start a transcode at the resume point
+        if (startTimeTicks > 0) put("StartTimeTicks", startTimeTicks)
+        if (forceTranscode) {
+            put("EnableDirectPlay", false)
+            put("EnableDirectStream", false)
         }
+        put("DeviceProfile", deviceProfile())
+    }
 
     /**
      * What our players can Direct Play. Both engines are FFmpeg-backed, so
@@ -361,19 +413,35 @@ class JellyfinApi(
     }
 
     /** Tells the server playback started — enables "continue watching". */
-    suspend fun reportPlaybackStart(itemId: String) =
-        postPlaybackReport("Sessions/Playing", PlaybackReport(itemId))
-
-    /** Periodic position update (Jellyfin ticks: 1 s = 10_000_000). */
-    suspend fun reportPlaybackProgress(itemId: String, positionTicks: Long, isPaused: Boolean) =
+    suspend fun reportPlaybackStart(itemId: String, playSessionId: String? = null) =
         postPlaybackReport(
-            "Sessions/Playing/Progress",
-            PlaybackReport(itemId, positionTicks, isPaused),
+            "Sessions/Playing",
+            PlaybackReport(itemId, playSessionId = playSessionId),
         )
 
-    /** Final position — the server stores it as the resume point. */
-    suspend fun reportPlaybackStopped(itemId: String, positionTicks: Long) =
-        postPlaybackReport("Sessions/Playing/Stopped", PlaybackReport(itemId, positionTicks))
+    /** Periodic position update (Jellyfin ticks: 1 s = 10_000_000). */
+    suspend fun reportPlaybackProgress(
+        itemId: String,
+        positionTicks: Long,
+        isPaused: Boolean,
+        playSessionId: String? = null,
+    ) = postPlaybackReport(
+        "Sessions/Playing/Progress",
+        PlaybackReport(itemId, positionTicks, isPaused, playSessionId = playSessionId),
+    )
+
+    /**
+     * Final position — the server stores it as the resume point, and uses
+     * PlaySessionId to terminate any transcode job still running for it.
+     */
+    suspend fun reportPlaybackStopped(
+        itemId: String,
+        positionTicks: Long,
+        playSessionId: String? = null,
+    ) = postPlaybackReport(
+        "Sessions/Playing/Stopped",
+        PlaybackReport(itemId, positionTicks, playSessionId = playSessionId),
+    )
 
     private suspend fun postPlaybackReport(path: String, report: PlaybackReport) {
         val s = requireSession()
