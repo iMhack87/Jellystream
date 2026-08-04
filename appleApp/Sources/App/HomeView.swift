@@ -373,18 +373,14 @@ private struct LibraryRow: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: HomeMetrics.cardSpacing) {
                     ForEach(section.items, id: \.id) { item in
-                        // Same ATV+ lockup recipe as ContinueRow
                         NavigationLink(value: item) {
-                            #if os(tvOS)
-                            PosterArtwork(api: api, item: item)
+                            // Apple TV store card: the caption lives inside
+                            // the artwork on a bottom scrim — no sibling
+                            // text (Continue/Next Up rows keep theirs)
+                            PosterOverlayCard(api: api, item: item)
+                                #if os(tvOS)
                                 .hoverEffect(.highlight)
-                            Text(item.name ?? "")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                            #else
-                            PosterCard(api: api, item: item)
-                            #endif
+                                #endif
                         }
                         .disabled(!item.isPlayable && !item.isSeries)
                         #if os(tvOS)
@@ -405,8 +401,11 @@ private struct LibraryRow: View {
     }
 }
 
-/** Poster image alone — the tvOS lockup artwork (titles are siblings). */
-private struct PosterArtwork: View {
+/**
+ * Apple TV store-style poster: caption inside the card over a bottom
+ * scrim, hairline border so dark posters keep an edge on black.
+ */
+private struct PosterOverlayCard: View {
     let api: JellyfinApi
     let item: BaseItem
 
@@ -419,30 +418,42 @@ private struct PosterArtwork: View {
     #endif
 
     var body: some View {
-        AsyncImage(url: api.imageUrl(item: item, maxWidth: 800).flatMap { URL(string: $0) }) { image in
-            image.resizable().scaledToFill()
-        } placeholder: {
-            Rectangle().fill(Color(white: 0.12))
-        }
-        .frame(width: Self.width, height: Self.height)
-        .clipped()
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-    }
-}
+        ZStack(alignment: .bottomLeading) {
+            AsyncImage(url: api.imageUrl(item: item, maxWidth: 800).flatMap { URL(string: $0) }) { image in
+                image.resizable().scaledToFill()
+            } placeholder: {
+                Rectangle().fill(Color(white: 0.12))
+            }
+            .frame(width: Self.width, height: Self.height)
+            .clipped()
 
-private struct PosterCard: View {
-    let api: JellyfinApi
-    let item: BaseItem
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            PosterArtwork(api: api, item: item)
+            LinearGradient(
+                stops: [
+                    .init(color: .black.opacity(0.75), location: 0.0),
+                    .init(color: .black.opacity(0.25), location: 0.55),
+                    .init(color: .clear, location: 1.0),
+                ],
+                startPoint: .bottom,
+                endPoint: .top
+            )
+            .frame(height: Self.height * 0.3)
+            .frame(maxHeight: .infinity, alignment: .bottom)
 
             Text(item.name ?? "")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-                .frame(width: PosterArtwork.width, alignment: .leading)
+                .font(.caption.bold())
+                .foregroundStyle(.white.opacity(0.95))
+                .lineLimit(1)
+                #if os(tvOS)
+                .padding(14)
+                #else
+                .padding(8)
+                #endif
         }
+        .frame(width: Self.width, height: Self.height)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+        )
     }
 }

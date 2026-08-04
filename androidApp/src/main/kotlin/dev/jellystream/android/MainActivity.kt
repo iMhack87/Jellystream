@@ -811,35 +811,50 @@ private fun LibraryRow(api: JellyfinApi, section: LibrarySection, onOpen: (BaseI
     }
 }
 
+/**
+ * Apple TV store-style poster: caption inside the card over a bottom
+ * scrim, hairline border so dark posters keep an edge on black.
+ * (Continue/Next Up rows keep their text below the artwork.)
+ */
 @Composable
 private fun PosterCard(api: JellyfinApi, item: BaseItem, onOpen: (BaseItem) -> Unit) {
-    Column(
+    Box(
         modifier = Modifier
             .width(132.dp)
+            .height(198.dp)
             .dpadFocusEffect(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(10.dp))
+            .background(CinemaColors.SurfaceVariant)
+            .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
             .clickable(enabled = item.isPlayable || item.isSeries) { onOpen(item) },
-        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
+        AsyncImage(
+            model = api.imageUrl(item, 400),
+            contentDescription = item.name,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+        )
         Box(
             modifier = Modifier
-                .width(132.dp)
-                .height(198.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(CinemaColors.SurfaceVariant),
-        ) {
-            AsyncImage(
-                model = api.imageUrl(item, 400),
-                contentDescription = item.name,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .height(60.dp)
+                .background(
+                    Brush.verticalGradient(
+                        0.0f to Color.Transparent,
+                        1.0f to Color.Black.copy(alpha = 0.8f),
+                    )
+                ),
+        )
         Text(
             item.name ?: "",
-            style = MaterialTheme.typography.bodySmall,
-            color = CinemaColors.TextSecondary,
-            maxLines = 2,
+            style = MaterialTheme.typography.labelMedium,
+            color = Color.White,
+            maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(8.dp),
         )
     }
 }
