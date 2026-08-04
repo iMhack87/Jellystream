@@ -7,7 +7,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -17,17 +16,26 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import dev.jellystream.shared.BaseItem
 import dev.jellystream.shared.JellyfinApi
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-private const val TICKS_PER_MS = 10_000L
+/**
+ * Outlives any composable: the final Stopped report is launched from
+ * onDispose, at which point the screen's own coroutine scope is already
+ * being cancelled — a screen-tied scope would drop the request.
+ */
+private val playbackReportScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
 @Composable
 fun PlayerScreen(api: JellyfinApi, item: BaseItem, onClose: () -> Unit) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val streamUrl = remember { api.streamUrl(item) } ?: run {
-        onClose()
+    val streamUrl = remember { api.streamUrl(item) }
+    if (streamUrl == null) {
+        // No session — nothing to play; close via an effect, never mid-composition
+        LaunchedEffect(Unit) { onClose() }
         return
     }
 
@@ -49,7 +57,7 @@ fun PlayerScreen(api: JellyfinApi, item: BaseItem, onClose: () -> Unit) {
             runCatching {
                 api.reportPlaybackProgress(
                     item.id,
-                    player.currentPosition * TICKS_PER_MS,
+                    JellyfinApi.millisecondsToTicks(player.currentPosition),
                     isPaused = !player.isPlaying,
                 )
             }
@@ -58,10 +66,9 @@ fun PlayerScreen(api: JellyfinApi, item: BaseItem, onClose: () -> Unit) {
 
     DisposableEffect(Unit) {
         onDispose {
-            val positionTicks = player.currentPosition * TICKS_PER_MS
+            val positionTicks = JellyfinApi.millisecondsToTicks(player.currentPosition)
             player.release()
-            // Fire-and-forget: the resume point must survive closing the player
-            scope.launch {
+            playbackReportScope.launch {
                 runCatching { api.reportPlaybackStopped(item.id, positionTicks) }
             }
         }

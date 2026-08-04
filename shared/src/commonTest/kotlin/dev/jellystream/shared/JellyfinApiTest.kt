@@ -44,6 +44,23 @@ class JellyfinApiTest {
     }
 
     @Test
+    fun tickConversions_matchJellyfinWireFormat() {
+        assertEquals(10_000_000L, JellyfinApi.secondsToTicks(1.0))
+        assertEquals(10_000_000L, JellyfinApi.millisecondsToTicks(1_000))
+        assertEquals(28_552_310_000L, JellyfinApi.secondsToTicks(2855.231))
+    }
+
+    @Test
+    fun resumePositionSeconds_readsUserDataTicks() {
+        val watched = BaseItem(
+            id = "a",
+            userData = UserItemData(playbackPositionTicks = 28_350_000_000L),
+        )
+        assertEquals(2835.0, watched.resumePositionSeconds)
+        assertEquals(0.0, BaseItem(id = "b").resumePositionSeconds)
+    }
+
+    @Test
     fun isPlayable_moviesAndEpisodesOnly() {
         assertEquals(true, BaseItem(id = "a", type = "Movie").isPlayable)
         assertEquals(true, BaseItem(id = "b", type = "Episode").isPlayable)

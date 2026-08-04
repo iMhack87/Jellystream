@@ -8,8 +8,6 @@ import Libmpv
 /// Direct Play of virtually every format on Apple platforms.
 @MainActor
 final class PlayerModel: ObservableObject {
-    private static let ticksPerSecond = 10_000_000.0
-
     let api: JellyfinApi
     let item: BaseItem
 
@@ -24,6 +22,15 @@ final class PlayerModel: ObservableObject {
     init(api: JellyfinApi, item: BaseItem) {
         self.api = api
         self.item = item
+    }
+
+    // Safety net if onDisappear never fires: free mpv and the timer.
+    // (No stop report here — deinit can't guarantee ordering; shutdown() does that.)
+    deinit {
+        timer?.invalidate()
+        if let handle = mpv {
+            mpv_terminate_destroy(handle)
+        }
     }
 
     func attach(to layer: CAMetalLayer) {
@@ -64,7 +71,7 @@ final class PlayerModel: ObservableObject {
         timer?.invalidate()
         timer = nil
         guard let handle = mpv else { return }
-        let finalTicks = Int64(timePos * Self.ticksPerSecond)
+        let finalTicks = JellyfinApi.companion.secondsToTicks(seconds: timePos)
         mpv = nil
         mpv_terminate_destroy(handle)
         // Fire-and-forget: the resume point must survive closing the player
@@ -89,7 +96,7 @@ final class PlayerModel: ObservableObject {
         // Every 10 ticks (~5 s), tell the server where we are
         tickCount += 1
         if tickCount % 10 == 0 {
-            let ticks = Int64(timePos * Self.ticksPerSecond)
+            let ticks = JellyfinApi.companion.secondsToTicks(seconds: timePos)
             let paused = isPaused
             Task { [api, item] in
                 try? await api.reportPlaybackProgress(

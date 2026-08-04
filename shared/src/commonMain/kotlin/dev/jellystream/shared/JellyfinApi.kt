@@ -160,6 +160,13 @@ class JellyfinApi(
     }
 
     companion object {
+        /** Jellyfin wire format: 1 tick = 100 ns. */
+        const val TICKS_PER_SECOND = 10_000_000L
+
+        fun millisecondsToTicks(milliseconds: Long): Long = milliseconds * 10_000L
+
+        fun secondsToTicks(seconds: Double): Long = (seconds * TICKS_PER_SECOND).toLong()
+
         fun normalizeServerUrl(raw: String): String {
             val trimmed = raw.trim().trimEnd('/')
             return if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
