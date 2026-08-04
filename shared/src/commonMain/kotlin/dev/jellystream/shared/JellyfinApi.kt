@@ -214,6 +214,24 @@ class JellyfinApi(
         return "${s.baseUrl}/Videos/${item.id}/stream?static=true"
     }
 
+    /**
+     * Wide backdrop image for heroes/detail headers: the item's own backdrop,
+     * else its series' backdrop (episodes), else the primary image.
+     */
+    fun backdropUrl(item: BaseItem, maxWidth: Int = 1280): String? {
+        val s = session ?: return null
+        item.backdropImageTags?.firstOrNull()?.let { tag ->
+            return "${s.baseUrl}/Items/${item.id}/Images/Backdrop?maxWidth=$maxWidth&tag=$tag"
+        }
+        val parentId = item.parentBackdropItemId
+        item.parentBackdropImageTags?.firstOrNull()?.let { tag ->
+            if (parentId != null) {
+                return "${s.baseUrl}/Items/$parentId/Images/Backdrop?maxWidth=$maxWidth&tag=$tag"
+            }
+        }
+        return imageUrl(item, maxWidth)
+    }
+
     /** Primary image URL for an item, or null if the item has none. */
     fun imageUrl(item: BaseItem, maxWidth: Int = 400): String? {
         val s = session ?: return null

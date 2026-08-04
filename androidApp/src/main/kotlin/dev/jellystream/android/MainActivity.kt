@@ -6,17 +6,20 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -25,8 +28,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -34,7 +39,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -46,12 +50,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
-import androidx.compose.ui.platform.LocalContext
 import dev.jellystream.shared.BaseItem
 import dev.jellystream.shared.JellyfinApi
 import dev.jellystream.shared.PersistedSession
@@ -63,7 +69,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme()) {
+            JellystreamTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     // Keep content clear of status bar, cutout AND keyboard (IME):
                     // the centered login form deliberately shifts up when typing
@@ -141,6 +147,7 @@ private fun JellystreamApp() {
                     api = api,
                     session = s,
                     onOpen = ::open,
+                    onPlay = { playing = it },
                     onSearch = { backStack.add(Screen.Search) },
                     onLogout = {
                         // Best-effort server revocation; local state clears now
@@ -238,6 +245,7 @@ private fun HomeScreen(
     api: JellyfinApi,
     session: UserSession,
     onOpen: (BaseItem) -> Unit,
+    onPlay: (BaseItem) -> Unit,
     onSearch: () -> Unit,
     onLogout: () -> Unit,
 ) {
@@ -280,36 +288,222 @@ private fun HomeScreen(
         ) {
             CircularProgressIndicator()
         }
-        else -> LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(24.dp),
+        else -> {
+            // Hero must be openable: first playable item or series across sections
+            val hero = sections!!.asSequence()
+                .flatMap { it.items }
+                .firstOrNull { it.isPlayable || it.isSeries }
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 32.dp),
+                verticalArrangement = Arrangement.spacedBy(28.dp),
+            ) {
+                item(key = "hero") {
+                    HeroSection(
+                        api = api,
+                        item = hero,
+                        onOpen = onOpen,
+                        onPlay = onPlay,
+                        onSearch = onSearch,
+                        onLogout = onLogout,
+                    )
+                }
+                items(sections!!, key = { it.key }) { section ->
+                    if (section.key == "resume" || section.key == "nextup") {
+                        ContinueRow(api, section, onOpen)
+                    } else {
+                        LibraryRow(api, section, onOpen)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Full-bleed backdrop with a gradient into the background — the ATV+ hero. */
+@Composable
+private fun HeroSection(
+    api: JellyfinApi,
+    item: BaseItem?,
+    onOpen: (BaseItem) -> Unit,
+    onPlay: (BaseItem) -> Unit,
+    onSearch: () -> Unit,
+    onLogout: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(460.dp),
+    ) {
+        if (item != null) {
+            AsyncImage(
+                model = api.backdropUrl(item, 1280),
+                contentDescription = item.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable { onOpen(item) },
+            )
+        }
+        // Cinematic scrim: image melts into the page background
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0.0f to Color.Transparent,
+                        0.55f to Color.Transparent,
+                        1.0f to CinemaColors.Background,
+                    )
+                ),
+        )
+
+        Row(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .statusBarsPadding()
+                .padding(horizontal = 8.dp),
         ) {
-            item {
+            IconButton(onClick = onSearch) {
+                Icon(Icons.Default.Search, contentDescription = "Search", tint = Color.White)
+            }
+            IconButton(onClick = onLogout) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ExitToApp,
+                    contentDescription = "Log out",
+                    tint = Color.White,
+                )
+            }
+        }
+
+        if (item != null) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    item.name ?: "",
+                    style = MaterialTheme.typography.headlineLarge,
+                    color = Color.White,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                val meta = buildList {
+                    item.episodeLabel?.let { add("${item.seriesName ?: ""} $it".trim()) }
+                    item.productionYear?.let { add(it.toString()) }
+                    item.runtimeMinutes?.let { add("$it min") }
+                }.joinToString("  ·  ")
+                if (meta.isNotEmpty()) {
+                    Text(
+                        meta,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = CinemaColors.TextSecondary,
+                    )
+                }
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        session.serverName ?: "Jellyfin",
-                        style = MaterialTheme.typography.headlineMedium,
-                    )
-                    Row {
-                        IconButton(onClick = onSearch) {
-                            Icon(Icons.Default.Search, contentDescription = "Search")
+                    if (item.isPlayable) {
+                        Button(
+                            onClick = { onPlay(item) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color.White,
+                                contentColor = Color.Black,
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null)
+                            Spacer(Modifier.width(6.dp))
+                            Text(if (item.resumePositionSeconds > 60) "Resume" else "Play")
                         }
-                        IconButton(onClick = onLogout) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.ExitToApp,
-                                contentDescription = "Log out",
+                    }
+                    Text(
+                        "Details",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color.White,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { onOpen(item) }
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Landscape cards with a progress bar — Continue Watching / Next Up. */
+@Composable
+private fun ContinueRow(api: JellyfinApi, section: LibrarySection, onOpen: (BaseItem) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(
+            section.title,
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.padding(horizontal = 20.dp),
+        )
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            items(section.items, key = { it.id }) { item ->
+                Column(
+                    modifier = Modifier
+                        .width(248.dp)
+                        .clickable(enabled = item.isPlayable || item.isSeries) { onOpen(item) },
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .width(248.dp)
+                            .height(140.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(CinemaColors.SurfaceVariant),
+                    ) {
+                        AsyncImage(
+                            model = api.backdropUrl(item, 600),
+                            contentDescription = item.name,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                        item.playedFraction?.let { fraction ->
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomStart)
+                                    .fillMaxWidth()
+                                    .height(4.dp)
+                                    .background(CinemaColors.ProgressTrack),
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth(fraction.toFloat())
+                                        .height(4.dp)
+                                        .background(Color.White),
+                                )
+                            }
+                        }
+                    }
+                    Column {
+                        Text(
+                            item.name ?: "",
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        val sub = item.episodeLabel?.let { "${item.seriesName ?: ""} $it".trim() }
+                        if (sub != null) {
+                            Text(
+                                sub,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = CinemaColors.TextSecondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
                     }
                 }
-            }
-            items(sections!!, key = { it.key }) { section ->
-                LibraryRow(api, section, onOpen)
             }
         }
     }
@@ -317,14 +511,14 @@ private fun HomeScreen(
 
 @Composable
 private fun LibraryRow(api: JellyfinApi, section: LibrarySection, onOpen: (BaseItem) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(
             section.title,
             style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.padding(horizontal = 16.dp),
+            modifier = Modifier.padding(horizontal = 20.dp),
         )
         LazyRow(
-            contentPadding = PaddingValues(horizontal = 16.dp),
+            contentPadding = PaddingValues(horizontal = 20.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             items(section.items, key = { it.id }) { item ->
@@ -338,21 +532,28 @@ private fun LibraryRow(api: JellyfinApi, section: LibrarySection, onOpen: (BaseI
 private fun PosterCard(api: JellyfinApi, item: BaseItem, onOpen: (BaseItem) -> Unit) {
     Column(
         modifier = Modifier
-            .width(120.dp)
+            .width(132.dp)
             .clickable(enabled = item.isPlayable || item.isSeries) { onOpen(item) },
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        AsyncImage(
-            model = api.imageUrl(item, 400),
-            contentDescription = item.name,
-            contentScale = ContentScale.Crop,
+        Box(
             modifier = Modifier
-                .width(120.dp)
-                .height(180.dp)
-                .clip(RoundedCornerShape(8.dp)),
-        )
+                .width(132.dp)
+                .height(198.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(CinemaColors.SurfaceVariant),
+        ) {
+            AsyncImage(
+                model = api.imageUrl(item, 400),
+                contentDescription = item.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
         Text(
             item.name ?: "",
             style = MaterialTheme.typography.bodySmall,
+            color = CinemaColors.TextSecondary,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )

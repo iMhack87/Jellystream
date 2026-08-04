@@ -13,51 +13,85 @@ struct DetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 12) {
-                AsyncImage(url: api.imageUrl(item: item, maxWidth: 600).flatMap { URL(string: $0) }) { image in
-                    image.resizable().scaledToFill()
-                } placeholder: {
-                    Rectangle().fill(.quaternary)
+            VStack(alignment: .leading, spacing: 12) {
+                // Full-bleed backdrop melting into black
+                ZStack(alignment: .bottom) {
+                    AsyncImage(url: api.backdropUrl(item: item, maxWidth: 1920).flatMap { URL(string: $0) }) { image in
+                        image.resizable().scaledToFill()
+                    } placeholder: {
+                        Rectangle().fill(Color(white: 0.1))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 320)
+                    .clipped()
+
+                    LinearGradient(
+                        stops: [
+                            .init(color: .clear, location: 0.0),
+                            .init(color: .clear, location: 0.5),
+                            .init(color: .black, location: 1.0),
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 320)
                 }
-                .frame(width: 200, height: 300)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
 
-                Text(item.name ?? "")
-                    .font(.title.bold())
-                    .multilineTextAlignment(.center)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(item.name ?? "")
+                        .font(.title.bold())
+                        .foregroundStyle(.white)
 
-                if let episodeLabel = item.episodeLabel {
-                    Text("\(item.seriesName ?? "") · \(episodeLabel)")
+                    if let episodeLabel = item.episodeLabel {
+                        Text("\(item.seriesName ?? "") · \(episodeLabel)")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if !metaLine.isEmpty {
+                        Text(metaLine)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if let genres = item.genres, !genres.isEmpty {
+                        Text(genres.joined(separator: " · "))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Button {
+                        playingItem = item
+                    } label: {
+                        let resume = item.resumePositionSeconds
+                        Label(
+                            resume > 60 ? "Resume (\(Int(resume / 60)) min)" : "Play",
+                            systemImage: "play.fill"
+                        )
                         .font(.headline)
-                }
+                        #if !os(tvOS)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 10)
+                        .background(.white, in: RoundedRectangle(cornerRadius: 10))
+                        .foregroundStyle(.black)
+                        #endif
+                    }
+                    .buttonStyle(.plain)
 
-                if !metaLine.isEmpty {
-                    Text(metaLine).font(.subheadline)
+                    if let overview = item.overview {
+                        Text(overview)
+                            .font(.body)
+                            .foregroundStyle(.white.opacity(0.9))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
-
-                if let genres = item.genres, !genres.isEmpty {
-                    Text(genres.joined(separator: " · "))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Button {
-                    playingItem = item
-                } label: {
-                    let resume = item.resumePositionSeconds
-                    Text(resume > 60 ? "Resume (\(Int(resume / 60)) min)" : "Play")
-                        .frame(maxWidth: 240)
-                }
-                .buttonStyle(.borderedProminent)
-
-                if let overview = item.overview {
-                    Text(overview)
-                        .font(.body)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 32)
             }
-            .padding(24)
         }
+        .background(Color.black)
+        .ignoresSafeArea(edges: .top)
+        .preferredColorScheme(.dark)
         .navigationTitle(item.name ?? "")
         #if !os(tvOS)
         .navigationBarTitleDisplayMode(.inline)
