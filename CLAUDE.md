@@ -31,7 +31,8 @@ xcodebuild -project Jellystream.xcodeproj -scheme JellystreamTV -destination 'ge
 - **Simulateur iOS** : l'hôte est en AZERTY → l'injection `text` sort du charabia. Avant de taper : `xcrun simctl spawn <udid> defaults write .GlobalPreferences AppleKeyboards -array "en_US@sw=QWERTY;hw=Automatic"` puis redémarrer le simulateur.
 - **Émulateur Android** : les taps par coordonnées cassent dès que le clavier s'ouvre (le layout remonte, `safeDrawingPadding` inclut l'IME). Fiable : tap sur le 1er champ, puis `input keyevent 61` (TAB) pour passer au champ suivant, `KEYCODE_BACK` pour fermer le clavier avant de taper un bouton. L'autocorrect peut réécrire le texte ("demo"→"demon ") : toujours vérifier par capture avant de valider.
 
-- **Keychain + builds non signés** : `SecItemAdd` échoue (errSecMissingEntitlement) sur les builds simulateur `CODE_SIGNING_ALLOWED=NO` → `SessionStore` retombe sur UserDefaults dans ce cas. Sur appareil signé, c'est bien le Keychain qui est utilisé.
+- **Keychain + builds non signés** : `SecItemAdd` échoue (errSecMissingEntitlement) sur les builds simulateur `CODE_SIGNING_ALLOWED=NO` → `SessionStore` retombe sur UserDefaults dans ce cas. Sur appareil signé, c'est bien le Keychain qui est utilisé. Corollaire utile en E2E : on peut pré-injecter une session (`simctl spawn <udid> defaults write dev.jellystream.tv dev.jellystream.session -string '<json PersistedSession>'`) pour sauter l'écran de login.
+- **Simulateur tvOS : Échap ≠ Menu** (tvOS 26.5) : la touche Échap du clavier n'atteint jamais l'app (`onExitCommand` ne se déclenche pas, même hors panneau). Ne pas conclure à un bug app ; pour tester Menu, passer par Window > Show Apple TV Remote ou du matériel réel. Flèches et Entrée (select), eux, fonctionnent.
 
 ## Déploiement
 

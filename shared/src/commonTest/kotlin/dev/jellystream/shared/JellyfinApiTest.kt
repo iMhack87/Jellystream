@@ -82,6 +82,44 @@ class JellyfinApiTest {
     }
 
     @Test
+    fun activeSegment_findsIntroAtPosition() {
+        val intro = MediaSegment(type = "Intro", startTicks = 100_000_000L, endTicks = 900_000_000L) // 10s → 90s
+        val outro = MediaSegment(type = "Outro", startTicks = 12_000_000_000L, endTicks = 13_000_000_000L) // 1200s → 1300s
+        val segments = listOf(intro, outro)
+
+        assertNull(SkipSegments.activeSegment(segments, 5.0)) // before intro
+        assertEquals(intro, SkipSegments.activeSegment(segments, 10.0)) // enters at start
+        assertEquals(intro, SkipSegments.activeSegment(segments, 60.0))
+        assertNull(SkipSegments.activeSegment(segments, 89.0)) // inside tail margin
+        assertNull(SkipSegments.activeSegment(segments, 100.0)) // between segments
+        assertEquals(outro, SkipSegments.activeSegment(segments, 1250.0))
+    }
+
+    @Test
+    fun activeSegment_ignoresNonSkippableTypes() {
+        val recap = MediaSegment(type = "Recap", startTicks = 0L, endTicks = 600_000_000L)
+        val commercial = MediaSegment(type = "Commercial", startTicks = 0L, endTicks = 600_000_000L)
+        val unknown = MediaSegment(type = null, startTicks = 0L, endTicks = 600_000_000L)
+        assertNull(SkipSegments.activeSegment(listOf(recap, commercial, unknown), 30.0))
+    }
+
+    @Test
+    fun activeSegment_ignoresTooShortSegments() {
+        // 4 s intro — under MIN_SEGMENT_SECONDS, the button would just flash
+        val blip = MediaSegment(type = "Intro", startTicks = 100_000_000L, endTicks = 140_000_000L)
+        assertNull(SkipSegments.activeSegment(listOf(blip), 11.0))
+    }
+
+    @Test
+    fun mediaSegment_convertsTicksToSeconds() {
+        val segment = MediaSegment(type = "Intro", startTicks = 150_000_000L, endTicks = 1_050_000_000L)
+        assertEquals(15.0, segment.startSeconds)
+        assertEquals(105.0, segment.endSeconds)
+        assertEquals(true, segment.isIntro)
+        assertEquals(false, segment.isOutro)
+    }
+
+    @Test
     fun isPlayable_moviesAndEpisodesOnly() {
         assertEquals(true, BaseItem(id = "a", type = "Movie").isPlayable)
         assertEquals(true, BaseItem(id = "b", type = "Episode").isPlayable)
