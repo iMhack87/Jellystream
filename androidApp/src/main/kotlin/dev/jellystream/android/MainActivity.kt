@@ -77,15 +77,14 @@ private fun JellystreamApp() {
     var session by remember { mutableStateOf<UserSession?>(null) }
     var playing by remember { mutableStateOf<BaseItem?>(null) }
 
-    val playingUrl = playing?.let { api.streamUrl(it) }
     when (val s = session) {
         null -> LoginScreen(api, onLoggedIn = { session = it })
         // The player is an overlay: HomeScreen stays composed underneath so its
         // state (loaded sections) survives closing the player
         else -> androidx.compose.foundation.layout.Box {
             HomeScreen(api, s, onPlay = { playing = it })
-            if (playingUrl != null) {
-                PlayerScreen(playingUrl, onClose = { playing = null })
+            playing?.let { item ->
+                PlayerScreen(api, item, onClose = { playing = null })
             }
         }
     }
