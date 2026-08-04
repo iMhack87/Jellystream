@@ -33,7 +33,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full rationale.
 
 ## Status
 
-🚧 **Early days.** All four targets build and run: login against any Jellyfin server (https→http fallback for LAN servers), browse your library views, and tap a movie/episode to **Direct Play the original file** — mpv+FFmpeg on Apple platforms (the all-formats engine), Media3/ExoPlayer on Android (FFmpeg audio decoders coming next). No seeking/controls UI yet. See [docs/BUILDING.md](docs/BUILDING.md) to build.
+🚧 **Early days.** All four targets build and run: login against any Jellyfin server (https→http fallback for LAN servers), browse your library views, and tap a movie/episode to **Direct Play the original file** — mpv+FFmpeg on Apple platforms (the all-formats engine), Media3/ExoPlayer on Android (FFmpeg audio decoders coming next). Playback has pause/seek controls, **resumes where you left off**, and reports progress to the server ("continue watching", cross-device). No audio/subtitle track selection UI yet. See [docs/BUILDING.md](docs/BUILDING.md) to build.
 
 ## License
 

@@ -13,7 +13,7 @@ struct HomeView: View {
 
     @State private var sections: [LibrarySection]?
     @State private var error: String?
-    @State private var playingUrl: URL?
+    @State private var playingItem: BaseItem?
 
     var body: some View {
         NavigationStack {
@@ -35,15 +35,14 @@ struct HomeView: View {
             }
             .navigationTitle(session.serverName ?? "Jellyfin")
             .task { await load() }
-            .fullScreenCover(item: $playingUrl) { url in
-                PlayerScreen(url: url)
+            .fullScreenCover(item: $playingItem) { item in
+                PlayerScreen(api: api, item: item)
             }
         }
     }
 
     private func play(_ item: BaseItem) {
-        guard let raw = api.streamUrl(item: item), let url = URL(string: raw) else { return }
-        playingUrl = url
+        playingItem = item
     }
 
     private func load() async {
@@ -62,9 +61,7 @@ struct HomeView: View {
     }
 }
 
-extension URL: @retroactive Identifiable {
-    public var id: String { absoluteString }
-}
+extension BaseItem: @retroactive Identifiable {}
 
 private struct LibraryRow: View {
     let api: JellyfinApi

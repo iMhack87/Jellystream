@@ -124,6 +124,30 @@ class JellyfinApi(
         return "${s.baseUrl}/Items/${item.id}/Images/Primary?maxWidth=$maxWidth&tag=$tag"
     }
 
+    /** Tells the server playback started — enables "continue watching". */
+    suspend fun reportPlaybackStart(itemId: String) =
+        postPlaybackReport("Sessions/Playing", PlaybackReport(itemId))
+
+    /** Periodic position update (Jellyfin ticks: 1 s = 10_000_000). */
+    suspend fun reportPlaybackProgress(itemId: String, positionTicks: Long, isPaused: Boolean) =
+        postPlaybackReport(
+            "Sessions/Playing/Progress",
+            PlaybackReport(itemId, positionTicks, isPaused),
+        )
+
+    /** Final position — the server stores it as the resume point. */
+    suspend fun reportPlaybackStopped(itemId: String, positionTicks: Long) =
+        postPlaybackReport("Sessions/Playing/Stopped", PlaybackReport(itemId, positionTicks))
+
+    private suspend fun postPlaybackReport(path: String, report: PlaybackReport) {
+        val s = requireSession()
+        http.post("${s.baseUrl}/$path") {
+            header("Authorization", authorizationHeader(s.accessToken))
+            contentType(ContentType.Application.Json)
+            setBody(report)
+        }
+    }
+
     private fun requireSession(): UserSession =
         session ?: throw IllegalStateException("Not logged in — call login() first")
 
@@ -136,6 +160,13 @@ class JellyfinApi(
     }
 
     companion object {
+        /** Jellyfin wire format: 1 tick = 100 ns. */
+        const val TICKS_PER_SECOND = 10_000_000L
+
+        fun millisecondsToTicks(milliseconds: Long): Long = milliseconds * 10_000L
+
+        fun secondsToTicks(seconds: Double): Long = (seconds * TICKS_PER_SECOND).toLong()
+
         fun normalizeServerUrl(raw: String): String {
             val trimmed = raw.trim().trimEnd('/')
             return if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {

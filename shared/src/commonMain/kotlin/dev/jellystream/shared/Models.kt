@@ -40,6 +40,13 @@ data class UserSession(
 )
 
 @Serializable
+data class UserItemData(
+    /** Jellyfin ticks: 1 tick = 100 ns, so 1 second = 10_000_000 ticks. */
+    @SerialName("PlaybackPositionTicks") val playbackPositionTicks: Long? = null,
+    @SerialName("Played") val played: Boolean? = null,
+)
+
+@Serializable
 data class BaseItem(
     @SerialName("Id") val id: String,
     @SerialName("Name") val name: String? = null,
@@ -48,11 +55,24 @@ data class BaseItem(
     @SerialName("ProductionYear") val productionYear: Int? = null,
     @SerialName("ImageTags") val imageTags: Map<String, String>? = null,
     @SerialName("SeriesName") val seriesName: String? = null,
+    @SerialName("UserData") val userData: UserItemData? = null,
 ) {
     /** Direct playback targets — the single source of truth for both platforms. */
     val isPlayable: Boolean
         get() = type == "Movie" || type == "Episode"
+
+    /** Resume position in seconds, 0.0 when unwatched. */
+    val resumePositionSeconds: Double
+        get() = (userData?.playbackPositionTicks ?: 0L) / 10_000_000.0
 }
+
+@Serializable
+internal data class PlaybackReport(
+    @SerialName("ItemId") val itemId: String,
+    @SerialName("PositionTicks") val positionTicks: Long? = null,
+    @SerialName("IsPaused") val isPaused: Boolean = false,
+    @SerialName("PlayMethod") val playMethod: String = "DirectPlay",
+)
 
 @Serializable
 data class ItemsResult(

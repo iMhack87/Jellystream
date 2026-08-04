@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -13,20 +14,64 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import dev.jellystream.shared.BaseItem
+import dev.jellystream.shared.JellyfinApi
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
+/**
+ * Outlives any composable: the final Stopped report is launched from
+ * onDispose, at which point the screen's own coroutine scope is already
+ * being cancelled — a screen-tied scope would drop the request.
+ */
+private val playbackReportScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
 @Composable
-fun PlayerScreen(streamUrl: String, onClose: () -> Unit) {
+fun PlayerScreen(api: JellyfinApi, item: BaseItem, onClose: () -> Unit) {
     val context = LocalContext.current
+    val streamUrl = remember { api.streamUrl(item) }
+    if (streamUrl == null) {
+        // No session — nothing to play; close via an effect, never mid-composition
+        LaunchedEffect(Unit) { onClose() }
+        return
+    }
+
     val player = remember {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(streamUrl))
             prepare()
+            val resumeMs = (item.resumePositionSeconds * 1000).toLong()
+            if (resumeMs > 0) seekTo(resumeMs)
             playWhenReady = true
         }
     }
 
+    // Report start once, then position every 5 s while the screen is up
+    LaunchedEffect(item.id) {
+        runCatching { api.reportPlaybackStart(item.id) }
+        while (true) {
+            delay(5_000)
+            runCatching {
+                api.reportPlaybackProgress(
+                    item.id,
+                    JellyfinApi.millisecondsToTicks(player.currentPosition),
+                    isPaused = !player.isPlaying,
+                )
+            }
+        }
+    }
+
     DisposableEffect(Unit) {
-        onDispose { player.release() }
+        onDispose {
+            val positionTicks = JellyfinApi.millisecondsToTicks(player.currentPosition)
+            player.release()
+            playbackReportScope.launch {
+                runCatching { api.reportPlaybackStopped(item.id, positionTicks) }
+            }
+        }
     }
 
     BackHandler(onBack = onClose)
