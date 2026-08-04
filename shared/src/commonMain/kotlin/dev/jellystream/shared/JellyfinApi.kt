@@ -107,6 +107,16 @@ class JellyfinApi(
         }.body()
     }
 
+    /**
+     * Direct-stream URL for a playable item: the original file, container and
+     * all, served as-is (`static=true`) — the player does the work, not the
+     * server. Transcoding fallback comes later via PlaybackInfo.
+     */
+    fun streamUrl(item: BaseItem): String? {
+        val s = session ?: return null
+        return "${s.baseUrl}/Videos/${item.id}/stream?static=true&api_key=${s.accessToken}"
+    }
+
     /** Primary image URL for an item, or null if the item has none. */
     fun imageUrl(item: BaseItem, maxWidth: Int = 400): String? {
         val s = session ?: return null

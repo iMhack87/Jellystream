@@ -4,6 +4,7 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -74,10 +75,19 @@ private fun JellystreamApp() {
         )
     }
     var session by remember { mutableStateOf<UserSession?>(null) }
+    var playing by remember { mutableStateOf<BaseItem?>(null) }
 
+    val playingUrl = playing?.let { api.streamUrl(it) }
     when (val s = session) {
         null -> LoginScreen(api, onLoggedIn = { session = it })
-        else -> HomeScreen(api, s)
+        // The player is an overlay: HomeScreen stays composed underneath so its
+        // state (loaded sections) survives closing the player
+        else -> androidx.compose.foundation.layout.Box {
+            HomeScreen(api, s, onPlay = { playing = it })
+            if (playingUrl != null) {
+                PlayerScreen(playingUrl, onClose = { playing = null })
+            }
+        }
     }
 }
 
@@ -148,7 +158,7 @@ private fun LoginScreen(api: JellyfinApi, onLoggedIn: (UserSession) -> Unit) {
 private data class LibrarySection(val view: BaseItem, val latest: List<BaseItem>)
 
 @Composable
-private fun HomeScreen(api: JellyfinApi, session: UserSession) {
+private fun HomeScreen(api: JellyfinApi, session: UserSession, onPlay: (BaseItem) -> Unit) {
     var sections by remember { mutableStateOf<List<LibrarySection>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
 
@@ -196,14 +206,14 @@ private fun HomeScreen(api: JellyfinApi, session: UserSession) {
                 )
             }
             items(sections!!, key = { it.view.id }) { section ->
-                LibraryRow(api, section)
+                LibraryRow(api, section, onPlay)
             }
         }
     }
 }
 
 @Composable
-private fun LibraryRow(api: JellyfinApi, section: LibrarySection) {
+private fun LibraryRow(api: JellyfinApi, section: LibrarySection, onPlay: (BaseItem) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
             section.view.name ?: "Library",
@@ -215,15 +225,19 @@ private fun LibraryRow(api: JellyfinApi, section: LibrarySection) {
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             items(section.latest, key = { it.id }) { item ->
-                PosterCard(api, item)
+                PosterCard(api, item, onPlay)
             }
         }
     }
 }
 
 @Composable
-private fun PosterCard(api: JellyfinApi, item: BaseItem) {
-    Column(modifier = Modifier.width(120.dp)) {
+private fun PosterCard(api: JellyfinApi, item: BaseItem, onPlay: (BaseItem) -> Unit) {
+    Column(
+        modifier = Modifier
+            .width(120.dp)
+            .clickable(enabled = item.isPlayable) { onPlay(item) },
+    ) {
         AsyncImage(
             model = api.imageUrl(item, 400),
             contentDescription = item.name,

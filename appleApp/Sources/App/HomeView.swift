@@ -13,6 +13,7 @@ struct HomeView: View {
 
     @State private var sections: [LibrarySection]?
     @State private var error: String?
+    @State private var playingUrl: URL?
 
     var body: some View {
         NavigationStack {
@@ -23,7 +24,7 @@ struct HomeView: View {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 32) {
                             ForEach(sections) { section in
-                                LibraryRow(api: api, section: section)
+                                LibraryRow(api: api, section: section, onPlay: play)
                             }
                         }
                         .padding(.vertical)
@@ -34,7 +35,15 @@ struct HomeView: View {
             }
             .navigationTitle(session.serverName ?? "Jellyfin")
             .task { await load() }
+            .fullScreenCover(item: $playingUrl) { url in
+                PlayerScreen(url: url)
+            }
         }
+    }
+
+    private func play(_ item: BaseItem) {
+        guard let raw = api.streamUrl(item: item), let url = URL(string: raw) else { return }
+        playingUrl = url
     }
 
     private func load() async {
@@ -53,9 +62,14 @@ struct HomeView: View {
     }
 }
 
+extension URL: @retroactive Identifiable {
+    public var id: String { absoluteString }
+}
+
 private struct LibraryRow: View {
     let api: JellyfinApi
     let section: LibrarySection
+    let onPlay: (BaseItem) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -66,10 +80,17 @@ private struct LibraryRow: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 16) {
                     ForEach(section.latest, id: \.id) { item in
-                        PosterCard(api: api, item: item)
+                        Button {
+                            onPlay(item)
+                        } label: {
+                            PosterCard(api: api, item: item)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!item.isPlayable)
                     }
                 }
                 .padding(.horizontal)
+                .padding(.vertical, 8)
             }
         }
     }

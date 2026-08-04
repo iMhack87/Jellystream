@@ -36,4 +36,18 @@ class JellyfinApiTest {
         val item = BaseItem(id = "abc", imageTags = mapOf("Primary" to "tag1"))
         assertNull(api.imageUrl(item, 400))
     }
+
+    @Test
+    fun streamUrl_isNullWithoutSession() {
+        val api = JellyfinApi(deviceName = "test", deviceId = "test-id")
+        assertNull(api.streamUrl(BaseItem(id = "abc", type = "Movie")))
+    }
+
+    @Test
+    fun isPlayable_moviesAndEpisodesOnly() {
+        assertEquals(true, BaseItem(id = "a", type = "Movie").isPlayable)
+        assertEquals(true, BaseItem(id = "b", type = "Episode").isPlayable)
+        assertEquals(false, BaseItem(id = "c", type = "MusicAlbum").isPlayable)
+        assertEquals(false, BaseItem(id = "d", type = null).isPlayable)
+    }
 }

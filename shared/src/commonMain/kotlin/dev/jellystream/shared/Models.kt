@@ -48,7 +48,11 @@ data class BaseItem(
     @SerialName("ProductionYear") val productionYear: Int? = null,
     @SerialName("ImageTags") val imageTags: Map<String, String>? = null,
     @SerialName("SeriesName") val seriesName: String? = null,
-)
+) {
+    /** Direct playback targets — the single source of truth for both platforms. */
+    val isPlayable: Boolean
+        get() = type == "Movie" || type == "Episode"
+}
 
 @Serializable
 data class ItemsResult(

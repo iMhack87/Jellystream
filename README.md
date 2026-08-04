@@ -16,10 +16,10 @@ Jellystream aims to play **every format your Jellyfin server can throw at it, na
 
 | Platform | Status |
 |----------|--------|
-| Android | 🚧 In progress — login + library browsing (posters) |
-| Android TV | 🚧 In progress — login + library browsing (posters) |
-| iOS / iPadOS | 🚧 In progress — login + library browsing (posters) |
-| Apple TV (tvOS) | 🚧 In progress — login + library browsing (posters) |
+| Android | 🚧 In progress — login, library browsing, direct playback (Media3) |
+| Android TV | 🚧 In progress — login, library browsing, direct playback (Media3) |
+| iOS / iPadOS | 🚧 In progress — login, library browsing, direct playback (mpv) |
+| Apple TV (tvOS) | 🚧 In progress — login, library browsing, direct playback (mpv) |
 
 ## Tech stack
 
@@ -33,7 +33,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full rationale.
 
 ## Status
 
-🚧 **Early days.** All four targets build and run: login against any Jellyfin server (https→http fallback for LAN servers), then browse your library views with their latest additions and posters — backed by the shared KMP module. No player yet. See [docs/BUILDING.md](docs/BUILDING.md) to build.
+🚧 **Early days.** All four targets build and run: login against any Jellyfin server (https→http fallback for LAN servers), browse your library views, and tap a movie/episode to **Direct Play the original file** — mpv+FFmpeg on Apple platforms (the all-formats engine), Media3/ExoPlayer on Android (FFmpeg audio decoders coming next). No seeking/controls UI yet. See [docs/BUILDING.md](docs/BUILDING.md) to build.
 
 ## License
 
