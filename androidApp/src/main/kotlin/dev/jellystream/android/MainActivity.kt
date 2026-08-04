@@ -133,6 +133,10 @@ private fun JellystreamApp() {
         }
     }
 
+    fun goBack() {
+        if (backStack.size > 1) backStack.removeAt(backStack.lastIndex)
+    }
+
     when (val s = session) {
         null -> LoginScreen(
             api,
@@ -160,9 +164,19 @@ private fun JellystreamApp() {
                         session = null
                     },
                 )
-                is Screen.Detail -> DetailScreen(api, screen.item, onPlay = { playing = it })
-                is Screen.Series -> SeriesScreen(api, screen.item, onPlay = { playing = it })
-                Screen.Search -> SearchScreen(api, onOpen = ::open)
+                is Screen.Detail -> DetailScreen(
+                    api,
+                    screen.item,
+                    onPlay = { playing = it },
+                    onBack = ::goBack,
+                )
+                is Screen.Series -> SeriesScreen(
+                    api,
+                    screen.item,
+                    onPlay = { playing = it },
+                    onBack = ::goBack,
+                )
+                Screen.Search -> SearchScreen(api, onOpen = ::open, onBack = ::goBack)
             }
 
             BackHandler(enabled = backStack.size > 1 && playing == null) {
@@ -335,10 +349,17 @@ private fun HomeScreen(
     when {
         error != null -> Column(
             modifier = Modifier.fillMaxSize().padding(24.dp),
-            verticalArrangement = Arrangement.Center,
+            verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(error!!, color = MaterialTheme.colorScheme.error)
+            // Never strand the user on a dead server: offer a way out
+            Button(
+                onClick = onLogout,
+                modifier = Modifier.dpadFocusEffect(RoundedCornerShape(10.dp)),
+            ) {
+                Text("Log out")
+            }
         }
         sections == null -> Column(
             modifier = Modifier.fillMaxSize(),
