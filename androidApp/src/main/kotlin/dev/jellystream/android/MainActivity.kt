@@ -78,15 +78,18 @@ private fun JellystreamApp() {
     var playing by remember { mutableStateOf<BaseItem?>(null) }
 
     val playingUrl = playing?.let { api.streamUrl(it) }
-    when {
-        session == null -> LoginScreen(api, onLoggedIn = { session = it })
-        playingUrl != null -> PlayerScreen(playingUrl, onClose = { playing = null })
-        else -> HomeScreen(api, session!!, onPlay = { playing = it })
+    when (val s = session) {
+        null -> LoginScreen(api, onLoggedIn = { session = it })
+        // The player is an overlay: HomeScreen stays composed underneath so its
+        // state (loaded sections) survives closing the player
+        else -> androidx.compose.foundation.layout.Box {
+            HomeScreen(api, s, onPlay = { playing = it })
+            if (playingUrl != null) {
+                PlayerScreen(playingUrl, onClose = { playing = null })
+            }
+        }
     }
 }
-
-/** Direct playback targets only — folders/collections come later. */
-private fun BaseItem.isPlayable(): Boolean = type == "Movie" || type == "Episode"
 
 @Composable
 private fun LoginScreen(api: JellyfinApi, onLoggedIn: (UserSession) -> Unit) {
@@ -233,7 +236,7 @@ private fun PosterCard(api: JellyfinApi, item: BaseItem, onPlay: (BaseItem) -> U
     Column(
         modifier = Modifier
             .width(120.dp)
-            .clickable(enabled = item.isPlayable()) { onPlay(item) },
+            .clickable(enabled = item.isPlayable) { onPlay(item) },
     ) {
         AsyncImage(
             model = api.imageUrl(item, 400),

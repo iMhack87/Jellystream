@@ -66,10 +66,6 @@ extension URL: @retroactive Identifiable {
     public var id: String { absoluteString }
 }
 
-private func isPlayable(_ item: BaseItem) -> Bool {
-    item.type == "Movie" || item.type == "Episode"
-}
-
 private struct LibraryRow: View {
     let api: JellyfinApi
     let section: LibrarySection
@@ -90,7 +86,7 @@ private struct LibraryRow: View {
                             PosterCard(api: api, item: item)
                         }
                         .buttonStyle(.plain)
-                        .disabled(!isPlayable(item))
+                        .disabled(!item.isPlayable)
                     }
                 }
                 .padding(.horizontal)
