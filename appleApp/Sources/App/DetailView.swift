@@ -60,6 +60,8 @@ struct DetailView: View {
                             .foregroundStyle(.secondary)
                     }
 
+                    // tvOS: system style draws a real pill (visible unfocused,
+                    // focus lift handled) — .plain would be bare text
                     Button {
                         playingItem = item
                     } label: {
@@ -76,7 +78,9 @@ struct DetailView: View {
                         .foregroundStyle(.black)
                         #endif
                     }
+                    #if !os(tvOS)
                     .buttonStyle(.plain)
+                    #endif
 
                     if let overview = item.overview {
                         Text(overview)
@@ -92,8 +96,10 @@ struct DetailView: View {
         .background(Color.black)
         .ignoresSafeArea(edges: .top)
         .preferredColorScheme(.dark)
-        .navigationTitle(item.name ?? "")
+        // tvOS draws the navigation title over the full-bleed backdrop —
+        // ghost text on the image; the content already shows the title
         #if !os(tvOS)
+        .navigationTitle(item.name ?? "")
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .task {

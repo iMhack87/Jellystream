@@ -106,6 +106,20 @@ struct HomeView: View {
 
 extension BaseItem: @retroactive Identifiable {}
 
+/** Platform metrics: TV needs generous margins and focus breathing room. */
+enum HomeMetrics {
+    #if os(tvOS)
+    static let edgePadding: CGFloat = 64
+    static let rowVerticalPadding: CGFloat = 30
+    /** ATV+ shelves leave ~40pt between lockups so the focus lift breathes. */
+    static let cardSpacing: CGFloat = 40
+    #else
+    static let edgePadding: CGFloat = 24
+    static let rowVerticalPadding: CGFloat = 12
+    static let cardSpacing: CGFloat = 16
+    #endif
+}
+
 /** Full-bleed backdrop melting into black — the ATV+ hero. */
 private struct HeroSection: View {
     let api: JellyfinApi
@@ -152,10 +166,14 @@ private struct HeroSection: View {
                 }
 
                 #if os(tvOS)
-                let ctaSpacing: CGFloat = 48
+                let ctaSpacing: CGFloat = 24
                 #else
                 let ctaSpacing: CGFloat = 14
                 #endif
+                // On tvOS the system button style draws the pill itself
+                // (visible even unfocused, focus lift accounted for in
+                // layout) — a .plain button would be bare text over the
+                // backdrop and its focus effect would overlap the meta line
                 HStack(spacing: ctaSpacing) {
                     if item.isPlayable {
                         Button(action: onPlay) {
@@ -171,22 +189,29 @@ private struct HeroSection: View {
                             .foregroundStyle(.black)
                             #endif
                         }
+                        #if !os(tvOS)
                         .buttonStyle(.plain)
+                        #endif
                     }
 
                     NavigationLink(value: item) {
                         Text("Details")
                             .font(.headline)
-                            .foregroundStyle(.white)
                             #if !os(tvOS)
+                            .foregroundStyle(.white)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 10)
                             #endif
                     }
+                    #if !os(tvOS)
                     .buttonStyle(.plain)
+                    #endif
                 }
+                #if os(tvOS)
+                .padding(.top, 12)
+                #endif
             }
-            .padding(24)
+            .padding(HomeMetrics.edgePadding)
         }
         .frame(height: heroHeight)
     }
@@ -220,62 +245,94 @@ private struct ContinueRow: View {
             Text(section.title)
                 .font(.title2.bold())
                 .foregroundStyle(.white)
-                .padding(.horizontal, 24)
+                .padding(.horizontal, HomeMetrics.edgePadding)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 16) {
+                LazyHStack(alignment: .top, spacing: HomeMetrics.cardSpacing) {
                     ForEach(section.items, id: \.id) { item in
+                        // ATV+ lockup recipe (Apple's media-catalog sample):
+                        // borderless button, artwork and titles as separate
+                        // siblings — the system lifts the artwork on focus
+                        // and moves the titles out of the way itself
                         NavigationLink(value: item) {
+                            #if os(tvOS)
+                            artwork(for: item)
+                                .hoverEffect(.highlight)
+                            Text(item.name ?? "")
+                                .font(.callout)
+                                .lineLimit(1)
+                            if let sub = episodeSubtitle(for: item) {
+                                Text(sub)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            #else
                             VStack(alignment: .leading, spacing: 6) {
-                                ZStack(alignment: .bottomLeading) {
-                                    AsyncImage(url: api.backdropUrl(item: item, maxWidth: 600).flatMap { URL(string: $0) }) { image in
-                                        image.resizable().scaledToFill()
-                                    } placeholder: {
-                                        Rectangle().fill(Color(white: 0.12))
-                                    }
-                                    .frame(width: cardWidth, height: cardHeight)
-                                    .clipped()
-
-                                    if let fraction = item.playedFraction {
-                                        GeometryReader { geo in
-                                            ZStack(alignment: .leading) {
-                                                Rectangle().fill(.white.opacity(0.35))
-                                                Rectangle()
-                                                    .fill(.white)
-                                                    .frame(width: geo.size.width * CGFloat(truncating: fraction))
-                                            }
-                                        }
-                                        .frame(height: 4)
-                                    }
-                                }
-                                .frame(width: cardWidth, height: cardHeight)
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                                artwork(for: item)
 
                                 Text(item.name ?? "")
                                     .font(.callout)
                                     .foregroundStyle(.white)
                                     .lineLimit(1)
-                                if let label = item.episodeLabel {
-                                    Text("\(item.seriesName ?? "") \(label)".trimmingCharacters(in: .whitespaces))
+                                if let sub = episodeSubtitle(for: item) {
+                                    Text(sub)
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1)
                                 }
                             }
                             .frame(width: cardWidth)
+                            #endif
                         }
                         .disabled(!item.isPlayable && !item.isSeries)
                         #if os(tvOS)
-                        .buttonStyle(.card)
+                        .buttonStyle(.borderless)
                         #else
                         .buttonStyle(.plain)
                         #endif
                     }
                 }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 12)
+                .padding(.horizontal, HomeMetrics.edgePadding)
+                .padding(.vertical, HomeMetrics.rowVerticalPadding)
+            }
+            // Lets the focus lift scale outside the scroll bounds unclipped
+            #if os(tvOS)
+            .scrollClipDisabled()
+            #endif
+        }
+    }
+
+    private func episodeSubtitle(for item: BaseItem) -> String? {
+        item.episodeLabel.map {
+            "\(item.seriesName ?? "") \($0)".trimmingCharacters(in: .whitespaces)
+        }
+    }
+
+    private func artwork(for item: BaseItem) -> some View {
+        ZStack(alignment: .bottomLeading) {
+            AsyncImage(url: api.backdropUrl(item: item, maxWidth: 600).flatMap { URL(string: $0) }) { image in
+                image.resizable().scaledToFill()
+            } placeholder: {
+                Rectangle().fill(Color(white: 0.12))
+            }
+            .frame(width: cardWidth, height: cardHeight)
+            .clipped()
+
+            if let fraction = item.playedFraction {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Rectangle().fill(.white.opacity(0.35))
+                        Rectangle()
+                            .fill(.white)
+                            .frame(width: geo.size.width * CGFloat(truncating: fraction))
+                    }
+                }
+                .frame(height: 4)
             }
         }
+        .frame(width: cardWidth, height: cardHeight)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 
@@ -288,26 +345,65 @@ private struct LibraryRow: View {
             Text(section.title)
                 .font(.title2.bold())
                 .foregroundStyle(.white)
-                .padding(.horizontal, 24)
+                .padding(.horizontal, HomeMetrics.edgePadding)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 16) {
+                LazyHStack(alignment: .top, spacing: HomeMetrics.cardSpacing) {
                     ForEach(section.items, id: \.id) { item in
+                        // Same ATV+ lockup recipe as ContinueRow
                         NavigationLink(value: item) {
+                            #if os(tvOS)
+                            PosterArtwork(api: api, item: item)
+                                .hoverEffect(.highlight)
+                            Text(item.name ?? "")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                            #else
                             PosterCard(api: api, item: item)
+                            #endif
                         }
                         .disabled(!item.isPlayable && !item.isSeries)
                         #if os(tvOS)
-                        .buttonStyle(.card)
+                        .buttonStyle(.borderless)
                         #else
                         .buttonStyle(.plain)
                         #endif
                     }
                 }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 12)
+                .padding(.horizontal, HomeMetrics.edgePadding)
+                .padding(.vertical, HomeMetrics.rowVerticalPadding)
             }
+            // Lets the focus lift scale outside the scroll bounds unclipped
+            #if os(tvOS)
+            .scrollClipDisabled()
+            #endif
         }
+    }
+}
+
+/** Poster image alone — the tvOS lockup artwork (titles are siblings). */
+private struct PosterArtwork: View {
+    let api: JellyfinApi
+    let item: BaseItem
+
+    #if os(tvOS)
+    static let width: CGFloat = 250
+    static let height: CGFloat = 375
+    #else
+    static let width: CGFloat = 132
+    static let height: CGFloat = 198
+    #endif
+
+    var body: some View {
+        AsyncImage(url: api.imageUrl(item: item, maxWidth: 800).flatMap { URL(string: $0) }) { image in
+            image.resizable().scaledToFill()
+        } placeholder: {
+            Rectangle().fill(Color(white: 0.12))
+        }
+        .frame(width: Self.width, height: Self.height)
+        .clipped()
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -315,30 +411,15 @@ private struct PosterCard: View {
     let api: JellyfinApi
     let item: BaseItem
 
-    #if os(tvOS)
-    private let posterWidth: CGFloat = 250
-    private let posterHeight: CGFloat = 375
-    #else
-    private let posterWidth: CGFloat = 132
-    private let posterHeight: CGFloat = 198
-    #endif
-
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            AsyncImage(url: api.imageUrl(item: item, maxWidth: 800).flatMap { URL(string: $0) }) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
-                Rectangle().fill(Color(white: 0.12))
-            }
-            .frame(width: posterWidth, height: posterHeight)
-            .clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            PosterArtwork(api: api, item: item)
 
             Text(item.name ?? "")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
-                .frame(width: posterWidth, alignment: .leading)
+                .frame(width: PosterArtwork.width, alignment: .leading)
         }
     }
 }
