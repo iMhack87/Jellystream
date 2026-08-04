@@ -58,7 +58,15 @@ final class AppModel: ObservableObject {
                 }
                 quickConnectCode = initial.code
                 var authenticated = initial.authenticated
+                // Jellyfin codes expire (~5 min); stop polling rather than
+                // hanging forever on a dead code
+                let deadline = Date().addingTimeInterval(5 * 60)
                 while !authenticated {
+                    if Date() > deadline {
+                        quickConnectCode = nil
+                        status = .failure("Quick Connect code expired — try again")
+                        return
+                    }
                     try await Task.sleep(nanoseconds: 3_000_000_000)
                     if Task.isCancelled { return }
                     let state = try await api.getQuickConnectState(

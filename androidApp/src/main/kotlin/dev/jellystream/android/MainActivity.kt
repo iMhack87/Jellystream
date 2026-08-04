@@ -253,7 +253,14 @@ private fun LoginScreen(api: JellyfinApi, onLoggedIn: (UserSession) -> Unit) {
                             val (baseUrl, initial) = api.initiateQuickConnect(serverUrl)
                             quickConnectCode = initial.code
                             var state = initial
+                            // Jellyfin codes expire (~5 min); stop polling
+                            // rather than hanging forever on a dead code
+                            val deadline = System.currentTimeMillis() + 5 * 60_000
                             while (!state.authenticated) {
+                                if (System.currentTimeMillis() > deadline) {
+                                    error = "Quick Connect code expired — try again"
+                                    return@launch
+                                }
                                 delay(3_000)
                                 state = api.getQuickConnectState(baseUrl, initial.secret)
                             }

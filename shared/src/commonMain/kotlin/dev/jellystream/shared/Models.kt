@@ -179,6 +179,8 @@ data class PlaybackPlan(
     val url: String,
     val isTranscode: Boolean,
     val externalSubtitles: List<ExternalSubtitle>,
+    /** Identifies the transcode job so Stopped can terminate it server-side. */
+    val playSessionId: String? = null,
 )
 
 @Serializable
@@ -187,6 +189,7 @@ internal data class PlaybackReport(
     @SerialName("PositionTicks") val positionTicks: Long? = null,
     @SerialName("IsPaused") val isPaused: Boolean = false,
     @SerialName("PlayMethod") val playMethod: String = "DirectPlay",
+    @SerialName("PlaySessionId") val playSessionId: String? = null,
 )
 
 @Serializable
