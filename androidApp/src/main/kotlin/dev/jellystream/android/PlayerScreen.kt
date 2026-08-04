@@ -82,6 +82,9 @@ fun PlayerScreen(api: JellyfinApi, item: BaseItem, onClose: () -> Unit) {
             PlayerView(ctx).apply {
                 this.player = player
                 keepScreenOn = true
+                // Opens the built-in text-track dialog; audio tracks live
+                // under the settings (gear) button of the same controller
+                setShowSubtitleButton(true)
             }
         },
     )

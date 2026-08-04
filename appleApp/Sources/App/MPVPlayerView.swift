@@ -6,6 +6,20 @@ import Libmpv
 /// Minimal libmpv player: renders into a CAMetalLayer via gpu-next/Vulkan
 /// (MoltenVK, shipped by MPVKit). mpv+FFmpeg is what gives Jellystream
 /// Direct Play of virtually every format on Apple platforms.
+/// One entry of mpv's `track-list` property (JSON).
+struct MediaTrack: Decodable, Identifiable {
+    let id: Int
+    let type: String   // "video" | "audio" | "sub"
+    let title: String?
+    let lang: String?
+    let selected: Bool
+
+    var label: String {
+        let parts = [title, lang].compactMap { $0 }
+        return parts.isEmpty ? "Track \(id)" : parts.joined(separator: " · ")
+    }
+}
+
 @MainActor
 final class PlayerModel: ObservableObject {
     let api: JellyfinApi
@@ -14,6 +28,8 @@ final class PlayerModel: ObservableObject {
     @Published var timePos: Double = 0
     @Published var duration: Double = 0
     @Published var isPaused = false
+    @Published var audioTracks: [MediaTrack] = []
+    @Published var subtitleTracks: [MediaTrack] = []
 
     private var mpv: OpaquePointer?
     private var timer: Timer?
@@ -88,10 +104,35 @@ final class PlayerModel: ObservableObject {
         command("seek", String(seconds), "absolute")
     }
 
+    func selectAudioTrack(id: Int) {
+        setString("aid", String(id))
+        refreshTracks()
+    }
+
+    /** nil disables subtitles. */
+    func selectSubtitleTrack(id: Int?) {
+        setString("sid", id.map(String.init) ?? "no")
+        refreshTracks()
+    }
+
+    private func refreshTracks() {
+        guard let json = getString("track-list"),
+              let data = json.data(using: .utf8),
+              let tracks = try? JSONDecoder().decode([MediaTrack].self, from: data)
+        else { return }
+        audioTracks = tracks.filter { $0.type == "audio" }
+        subtitleTracks = tracks.filter { $0.type == "sub" }
+    }
+
     private func tick() {
         timePos = getDouble("time-pos")
         duration = getDouble("duration")
         isPaused = getFlag("pause")
+
+        // Track list settles once demuxing starts; refresh every 2 s
+        if tickCount % 4 == 0 {
+            refreshTracks()
+        }
 
         // Every 10 ticks (~5 s), tell the server where we are
         tickCount += 1
@@ -120,6 +161,19 @@ final class PlayerModel: ObservableObject {
         var value: Int32 = 0
         mpv_get_property(handle, name, MPV_FORMAT_FLAG, &value)
         return value != 0
+    }
+
+    private func getString(_ name: String) -> String? {
+        guard let handle = mpv,
+              let cString = mpv_get_property_string(handle, name)
+        else { return nil }
+        defer { mpv_free(cString) }
+        return String(cString: cString)
+    }
+
+    private func setString(_ name: String, _ value: String) {
+        guard let handle = mpv else { return }
+        mpv_set_property_string(handle, name, value)
     }
 
     private func command(_ args: String...) {
@@ -213,6 +267,53 @@ struct PlayerScreen: View {
             Text(Self.timeString(model.duration))
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.white)
+
+            if model.audioTracks.count > 1 {
+                Menu {
+                    ForEach(model.audioTracks) { track in
+                        Button {
+                            model.selectAudioTrack(id: track.id)
+                        } label: {
+                            if track.selected {
+                                Label(track.label, systemImage: "checkmark")
+                            } else {
+                                Text(track.label)
+                            }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "waveform")
+                        .foregroundStyle(.white)
+                }
+            }
+
+            if !model.subtitleTracks.isEmpty {
+                Menu {
+                    Button {
+                        model.selectSubtitleTrack(id: nil)
+                    } label: {
+                        if !model.subtitleTracks.contains(where: \.selected) {
+                            Label("Off", systemImage: "checkmark")
+                        } else {
+                            Text("Off")
+                        }
+                    }
+                    ForEach(model.subtitleTracks) { track in
+                        Button {
+                            model.selectSubtitleTrack(id: track.id)
+                        } label: {
+                            if track.selected {
+                                Label(track.label, systemImage: "checkmark")
+                            } else {
+                                Text(track.label)
+                            }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "captions.bubble")
+                        .foregroundStyle(.white)
+                }
+            }
         }
         .padding(12)
         .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
