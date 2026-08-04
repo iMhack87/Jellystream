@@ -12,6 +12,7 @@ struct HomeView: View {
     let api: JellyfinApi
     let session: UserSession
     let onLogout: () -> Void
+    let onSwitchProfile: () -> Void
 
     @State private var sections: [LibrarySection]?
     @State private var error: String?
@@ -29,7 +30,11 @@ struct HomeView: View {
                             // Hero must be openable: first playable item or series
                             if let hero = sections.flatMap(\.items)
                                 .first(where: { $0.isPlayable || $0.isSeries }) {
-                                HeroSection(api: api, item: hero) {
+                                HeroSection(
+                                    api: api,
+                                    item: hero,
+                                    onSwitchProfile: onSwitchProfile
+                                ) {
                                     playingItem = hero
                                 }
                             }
@@ -65,6 +70,13 @@ struct HomeView: View {
                     showSearch = true
                 } label: {
                     Image(systemName: "magnifyingglass")
+                }
+                // Back to "who's watching" — also the only path from a
+                // single-profile install to adding a second account
+                Button {
+                    onSwitchProfile()
+                } label: {
+                    Image(systemName: "person.crop.circle")
                 }
                 Button {
                     onLogout()
@@ -110,6 +122,7 @@ extension BaseItem: @retroactive Identifiable {}
 private struct HeroSection: View {
     let api: JellyfinApi
     let item: BaseItem
+    let onSwitchProfile: () -> Void
     let onPlay: () -> Void
 
     #if os(tvOS)
@@ -184,6 +197,16 @@ private struct HeroSection: View {
                             #endif
                     }
                     .buttonStyle(.plain)
+
+                    #if os(tvOS)
+                    // No toolbar on tvOS — the hero row is where the
+                    // switch-profile affordance lives (and the only path
+                    // from one profile to a second account)
+                    Button(action: onSwitchProfile) {
+                        Label("Profile", systemImage: "person.crop.circle")
+                            .font(.headline)
+                    }
+                    #endif
                 }
             }
             .padding(24)

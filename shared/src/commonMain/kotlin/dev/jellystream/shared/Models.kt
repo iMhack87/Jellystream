@@ -54,8 +54,56 @@ data class PersistedSession(
 ) {
     fun toJson(): String = Json.encodeToString(serializer(), this)
 
+    /** Stable identity of a profile: one account on one server. */
+    val profileKey: String
+        get() = "${session.baseUrl}|${session.userId}"
+
+    /** What the profile picker shows. */
+    val displayName: String
+        get() = session.userName ?: "User"
+
+    val serverLabel: String
+        get() = session.serverName
+            ?: session.baseUrl.removePrefix("https://").removePrefix("http://")
+
+    /** Single uppercase letter for the avatar circle. */
+    val initial: String
+        get() = (displayName.firstOrNull() ?: 'U').uppercaseChar().toString()
+
     companion object {
         fun fromJson(json: String): PersistedSession? =
+            try {
+                Json { ignoreUnknownKeys = true }.decodeFromString(serializer(), json)
+            } catch (e: Exception) {
+                null
+            }
+    }
+}
+
+/**
+ * Every account this install knows, wire format owned by shared — the
+ * platforms persist the JSON blob under a dedicated "profiles" key and
+ * migrate any legacy single-session blob into a one-profile list. Each
+ * profile keeps its own deviceId: Jellyfin ties sessions to DeviceId,
+ * and two users sharing one id would revoke each other's tokens.
+ */
+@Serializable
+data class PersistedProfiles(
+    val profiles: List<PersistedSession> = emptyList(),
+) {
+    fun toJson(): String = Json.encodeToString(serializer(), this)
+
+    /** Adds a profile, replacing any existing one for the same server+user. */
+    fun withProfile(profile: PersistedSession): PersistedProfiles =
+        PersistedProfiles(
+            profiles.filterNot { it.profileKey == profile.profileKey } + profile
+        )
+
+    fun withoutProfile(profile: PersistedSession): PersistedProfiles =
+        PersistedProfiles(profiles.filterNot { it.profileKey == profile.profileKey })
+
+    companion object {
+        fun fromJson(json: String): PersistedProfiles? =
             try {
                 Json { ignoreUnknownKeys = true }.decodeFromString(serializer(), json)
             } catch (e: Exception) {

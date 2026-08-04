@@ -15,31 +15,84 @@ final class AppModel: ObservableObject {
     @Published var status: Status = .idle
     @Published var session: UserSession?
     @Published var quickConnectCode: String?
+    /// Every account this install knows (shared module owns the format).
+    @Published var profiles: [PersistedSession] = []
+    /// True while the user is logging into an additional account from the
+    /// profile picker — shows ConnectView with a way back.
+    @Published var addingProfile = false
 
-    let api: JellyfinApi
-    private let deviceId: String
+    /// Rebuilt on profile switch: Jellyfin ties sessions to DeviceId and
+    /// every profile carries its own.
+    @Published private(set) var api: JellyfinApi
+    private var deviceId: String
 
     init() {
-        let persisted = SessionStore.load()
-        // Jellyfin ties sessions to DeviceId — reuse the stored one so the
-        // server sees the same device across launches
-        let deviceId = persisted?.deviceId ?? UUID().uuidString
-        self.deviceId = deviceId
-        api = JellyfinApi(
+        let stored = SessionStore.loadProfiles()
+        profiles = stored.profiles
+        // A single profile enters directly (pre-profiles behavior); with
+        // several, RootView shows the picker and `session` stays nil
+        if stored.profiles.count == 1, let only = stored.profiles.first {
+            deviceId = only.deviceId
+            api = Self.makeApi(deviceId: only.deviceId)
+            api.restoreSession(restored: only.session)
+            session = only.session
+        } else {
+            deviceId = UUID().uuidString
+            api = Self.makeApi(deviceId: deviceId)
+        }
+    }
+
+    private static func makeApi(deviceId: String) -> JellyfinApi {
+        JellyfinApi(
             clientName: "Jellystream",
             clientVersion: "0.1.0",
             deviceName: UIDevice.current.name,
             deviceId: deviceId
         )
-        if let persisted {
-            api.restoreSession(restored: persisted.session)
-            session = persisted.session
-        }
     }
 
     var isLoading: Bool {
         if case .loading = status { return true }
         return false
+    }
+
+    func select(profile: PersistedSession) {
+        deviceId = profile.deviceId
+        api = Self.makeApi(deviceId: profile.deviceId)
+        api.restoreSession(restored: profile.session)
+        session = profile.session
+    }
+
+    /// New accounts get a fresh DeviceId — two users sharing one would
+    /// revoke each other's tokens server-side.
+    func startAddProfile() {
+        deviceId = UUID().uuidString
+        api = Self.makeApi(deviceId: deviceId)
+        status = .idle
+        quickConnectCode = nil
+        addingProfile = true
+    }
+
+    func cancelAddProfile() {
+        status = .idle
+        quickConnectCode = nil
+        addingProfile = false
+    }
+
+    /// Back to the picker, keeping the account — the only path from a
+    /// single-profile install to a second account.
+    func switchProfile() {
+        session = nil
+        addingProfile = false
+    }
+
+    private func adopt(session: UserSession) {
+        let profile = PersistedSession(deviceId: deviceId, session: session)
+        let updated = PersistedProfiles(profiles: profiles).withProfile(profile: profile)
+        profiles = updated.profiles
+        SessionStore.saveProfiles(updated)
+        self.session = session
+        addingProfile = false
     }
 
     /// Quick Connect: show a code, poll until the user approves it elsewhere.
@@ -79,8 +132,7 @@ final class AppModel: ObservableObject {
                     baseUrl: baseUrl,
                     secret: initial.secret
                 )
-                SessionStore.save(PersistedSession(deviceId: deviceId, session: session))
-                self.session = session
+                adopt(session: session)
                 quickConnectCode = nil
                 status = .idle
             } catch {
@@ -90,11 +142,20 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Removes the active profile only; other accounts stay available.
     func logout() {
         // Best-effort server revocation; local state clears now
         Task { [api] in try? await api.logout() }
-        SessionStore.clear()
+        if let current = session,
+           let profile = profiles.first(where: {
+               $0.session.baseUrl == current.baseUrl && $0.session.userId == current.userId
+           }) {
+            let updated = PersistedProfiles(profiles: profiles).withoutProfile(profile: profile)
+            profiles = updated.profiles
+            SessionStore.saveProfiles(updated)
+        }
         session = nil
+        addingProfile = false
     }
 
     func login(serverUrl: String, username: String, password: String) {
@@ -106,8 +167,7 @@ final class AppModel: ObservableObject {
                     username: username,
                     password: password
                 )
-                SessionStore.save(PersistedSession(deviceId: deviceId, session: session))
-                self.session = session
+                adopt(session: session)
                 status = .idle
             } catch {
                 status = .failure(error.localizedDescription)
@@ -121,9 +181,17 @@ struct RootView: View {
 
     var body: some View {
         if let session = model.session {
-            HomeView(api: model.api, session: session, onLogout: { model.logout() })
-        } else {
+            HomeView(
+                api: model.api,
+                session: session,
+                onLogout: { model.logout() },
+                onSwitchProfile: { model.switchProfile() }
+            )
+        } else if model.profiles.isEmpty || model.addingProfile {
             ConnectView(model: model)
+        } else {
+            // Several known accounts and none active — ask who's watching
+            ProfilePickerView(model: model)
         }
     }
 }
@@ -164,6 +232,13 @@ struct ConnectView: View {
                         model.startQuickConnect(serverUrl: serverUrl)
                     }
                     .disabled(model.isLoading || serverUrl.isEmpty)
+
+                    // Adding from the picker must always offer a way back
+                    if model.addingProfile {
+                        Button("Back to profiles", role: .cancel) {
+                            model.cancelAddProfile()
+                        }
+                    }
                 }
 
                 if let code = model.quickConnectCode {
@@ -185,7 +260,12 @@ struct ConnectView: View {
                     Text(message).foregroundStyle(.red)
                 }
             }
-            .navigationTitle("Jellystream")
+            .navigationTitle(model.addingProfile ? "Add Profile" : "Jellystream")
+            #if os(tvOS)
+            .onExitCommand {
+                if model.addingProfile { model.cancelAddProfile() }
+            }
+            #endif
         }
     }
 }
