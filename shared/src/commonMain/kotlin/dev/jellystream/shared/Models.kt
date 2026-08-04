@@ -129,6 +129,47 @@ data class BaseItem(
 }
 
 @Serializable
+data class MediaStream(
+    @SerialName("Index") val index: Int? = null,
+    @SerialName("Type") val type: String? = null,
+    @SerialName("Codec") val codec: String? = null,
+    @SerialName("Language") val language: String? = null,
+    @SerialName("DisplayTitle") val displayTitle: String? = null,
+    @SerialName("IsExternal") val isExternal: Boolean = false,
+    @SerialName("DeliveryUrl") val deliveryUrl: String? = null,
+)
+
+@Serializable
+data class MediaSourceInfo(
+    @SerialName("Id") val id: String? = null,
+    @SerialName("Container") val container: String? = null,
+    @SerialName("SupportsDirectPlay") val supportsDirectPlay: Boolean = true,
+    @SerialName("TranscodingUrl") val transcodingUrl: String? = null,
+    @SerialName("MediaStreams") val mediaStreams: List<MediaStream>? = null,
+)
+
+@Serializable
+data class PlaybackInfoResponse(
+    @SerialName("MediaSources") val mediaSources: List<MediaSourceInfo> = emptyList(),
+    @SerialName("PlaySessionId") val playSessionId: String? = null,
+)
+
+/** An external text subtitle the player must side-load. */
+data class ExternalSubtitle(
+    val url: String,
+    val language: String?,
+    val title: String?,
+    val codec: String?,
+)
+
+/** The server-negotiated way to play one item. */
+data class PlaybackPlan(
+    val url: String,
+    val isTranscode: Boolean,
+    val externalSubtitles: List<ExternalSubtitle>,
+)
+
+@Serializable
 internal data class PlaybackReport(
     @SerialName("ItemId") val itemId: String,
     @SerialName("PositionTicks") val positionTicks: Long? = null,

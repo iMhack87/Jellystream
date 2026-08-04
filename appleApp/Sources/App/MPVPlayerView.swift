@@ -75,13 +75,23 @@ final class PlayerModel: ObservableObject {
             return
         }
 
-        guard let url = api.streamUrl(item: item) else {
-            shutdown()
-            return
+        // Negotiate with the server (Direct Play vs HLS transcode + external
+        // subtitles), then hand the result to mpv
+        Task { [weak self] in
+            guard let self else { return }
+            let plan = try? await self.api.getPlaybackPlan(item: self.item, forceTranscode: false)
+            guard self.mpv != nil else { return } // closed while negotiating
+            let url = plan?.url ?? self.api.streamUrl(item: self.item)
+            guard let url else {
+                self.shutdown()
+                return
+            }
+            self.command("loadfile", url)
+            for subtitle in plan?.externalSubtitles ?? [] {
+                self.command("sub-add", subtitle.url, "auto")
+            }
+            try? await self.api.reportPlaybackStart(itemId: self.item.id)
         }
-        command("loadfile", url)
-
-        Task { try? await api.reportPlaybackStart(itemId: item.id) }
 
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
