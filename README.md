@@ -16,10 +16,10 @@ Jellystream aims to play **every format your Jellyfin server can throw at it, na
 
 | Platform | Status |
 |----------|--------|
-| Android | 🧭 Planned |
-| Android TV | 🧭 Planned |
-| iOS / iPadOS | 🧭 Planned |
-| Apple TV (tvOS) | 🧭 Planned |
+| Android | 🚧 Scaffolded — builds, server connect screen |
+| Android TV | 🚧 Scaffolded — builds, server connect screen |
+| iOS / iPadOS | 🚧 Scaffolded — builds, server connect screen |
+| Apple TV (tvOS) | 🚧 Scaffolded — builds, server connect screen |
 
 ## Tech stack
 
@@ -33,7 +33,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full rationale.
 
 ## Status
 
-🚧 **Early days.** Stack and license are decided; scaffolding is next. Nothing to install yet.
+🚧 **Early days.** The monorepo compiles on all targets (Android APK, iOS, tvOS) with a minimal server-connect screen backed by the shared KMP module. No player yet. See [docs/BUILDING.md](docs/BUILDING.md) to build.
 
 ## License
 
