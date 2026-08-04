@@ -61,6 +61,27 @@ class JellyfinApiTest {
     }
 
     @Test
+    fun runtimeMinutes_convertsTicks() {
+        // 97 min = 97 * 60 * 10_000_000 ticks
+        assertEquals(97, BaseItem(id = "a", runTimeTicks = 58_200_000_000L).runtimeMinutes)
+        assertEquals(null, BaseItem(id = "b").runtimeMinutes)
+    }
+
+    @Test
+    fun episodeLabel_formatsSeasonAndEpisode() {
+        assertEquals(
+            "S2 · E5",
+            BaseItem(id = "a", type = "Episode", indexNumber = 5, parentIndexNumber = 2).episodeLabel,
+        )
+        assertEquals(
+            "E5",
+            BaseItem(id = "b", type = "Episode", indexNumber = 5).episodeLabel,
+        )
+        assertEquals(null, BaseItem(id = "c", type = "Movie").episodeLabel)
+        assertEquals(null, BaseItem(id = "d", type = "Episode").episodeLabel)
+    }
+
+    @Test
     fun isPlayable_moviesAndEpisodesOnly() {
         assertEquals(true, BaseItem(id = "a", type = "Movie").isPlayable)
         assertEquals(true, BaseItem(id = "b", type = "Episode").isPlayable)

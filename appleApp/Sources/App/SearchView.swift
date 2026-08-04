@@ -42,7 +42,10 @@ struct SearchView: View {
             }
             try? await Task.sleep(nanoseconds: 400_000_000) // debounce
             guard !Task.isCancelled else { return }
-            results = (try? await api.search(query: query, limit: 24)) ?? []
+            let found = (try? await api.search(query: query, limit: 24)) ?? []
+            // Re-check: a cancelled stale task must not overwrite newer results
+            guard !Task.isCancelled else { return }
+            results = found
         }
     }
 }

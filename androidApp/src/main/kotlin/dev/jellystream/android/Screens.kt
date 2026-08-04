@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import dev.jellystream.shared.BaseItem
 import dev.jellystream.shared.JellyfinApi
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 
 @Composable
@@ -208,13 +209,20 @@ fun SearchScreen(api: JellyfinApi, onOpen: (BaseItem) -> Unit) {
     var searching by remember { mutableStateOf(false) }
 
     LaunchedEffect(query) {
+        searching = false
         if (query.length < 2) {
             results = emptyList()
             return@LaunchedEffect
         }
         delay(400) // debounce
         searching = true
-        runCatching { results = api.search(query, 24) }
+        try {
+            results = api.search(query, 24)
+        } catch (e: CancellationException) {
+            // Never swallow cancellation: a stale effect must not touch state
+            throw e
+        } catch (_: Exception) {
+        }
         searching = false
     }
 
