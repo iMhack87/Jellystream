@@ -1,7 +1,10 @@
 package dev.jellystream.android
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,8 +22,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -35,6 +42,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -54,63 +63,99 @@ fun DetailScreen(api: JellyfinApi, item: BaseItem, onPlay: (BaseItem) -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .verticalScroll(rememberScrollState()),
     ) {
-        AsyncImage(
-            model = api.imageUrl(full, 600),
-            contentDescription = full.name,
-            contentScale = ContentScale.Crop,
+        // Full-bleed backdrop melting into the background
+        Box(
             modifier = Modifier
-                .width(200.dp)
-                .height(300.dp)
-                .clip(RoundedCornerShape(12.dp)),
-        )
-
-        Text(
-            full.name ?: "",
-            style = MaterialTheme.typography.headlineMedium,
-        )
-        full.episodeLabel?.let {
-            Text("${full.seriesName ?: ""} · $it", style = MaterialTheme.typography.titleMedium)
-        }
-
-        val meta = buildList {
-            full.productionYear?.let { add(it.toString()) }
-            full.runtimeMinutes?.let { add("$it min") }
-            full.communityRating?.let { add("★ %.1f".format(it)) }
-        }.joinToString("  ·  ")
-        if (meta.isNotEmpty()) {
-            Text(meta, style = MaterialTheme.typography.bodyMedium)
-        }
-
-        full.genres?.takeIf { it.isNotEmpty() }?.let {
-            Text(
-                it.joinToString(" · "),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.secondary,
+                .fillMaxWidth()
+                .height(320.dp),
+        ) {
+            AsyncImage(
+                model = api.backdropUrl(full, 1280),
+                contentDescription = full.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            0.0f to Color.Transparent,
+                            0.5f to Color.Transparent,
+                            1.0f to CinemaColors.Background,
+                        )
+                    ),
             )
         }
 
-        Button(onClick = { onPlay(full) }) {
-            val resume = full.resumePositionSeconds
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
             Text(
-                if (resume > 60) {
-                    "Resume (${(resume / 60).toInt()} min)"
-                } else {
-                    "Play"
-                }
+                full.name ?: "",
+                style = MaterialTheme.typography.headlineMedium,
             )
-        }
+            full.episodeLabel?.let {
+                Text(
+                    "${full.seriesName ?: ""} · $it",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = CinemaColors.TextSecondary,
+                )
+            }
 
-        full.overview?.let {
-            Text(
-                it,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.fillMaxWidth(),
-            )
+            val meta = buildList {
+                full.productionYear?.let { add(it.toString()) }
+                full.runtimeMinutes?.let { add("$it min") }
+                full.communityRating?.let { add("★ %.1f".format(it)) }
+            }.joinToString("  ·  ")
+            if (meta.isNotEmpty()) {
+                Text(
+                    meta,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = CinemaColors.TextSecondary,
+                )
+            }
+
+            full.genres?.takeIf { it.isNotEmpty() }?.let {
+                Text(
+                    it.joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = CinemaColors.TextSecondary,
+                )
+            }
+
+            Button(
+                onClick = { onPlay(full) },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.White,
+                    contentColor = Color.Black,
+                ),
+                shape = RoundedCornerShape(10.dp),
+            ) {
+                Icon(Icons.Default.PlayArrow, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                val resume = full.resumePositionSeconds
+                Text(
+                    if (resume > 60) {
+                        "Resume (${(resume / 60).toInt()} min)"
+                    } else {
+                        "Play"
+                    }
+                )
+            }
+
+            full.overview?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
     }
 }

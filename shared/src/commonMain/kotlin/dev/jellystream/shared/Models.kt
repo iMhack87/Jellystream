@@ -88,6 +88,9 @@ data class BaseItem(
     @SerialName("CommunityRating") val communityRating: Double? = null,
     @SerialName("IndexNumber") val indexNumber: Int? = null,
     @SerialName("ParentIndexNumber") val parentIndexNumber: Int? = null,
+    @SerialName("BackdropImageTags") val backdropImageTags: List<String>? = null,
+    @SerialName("ParentBackdropItemId") val parentBackdropItemId: String? = null,
+    @SerialName("ParentBackdropImageTags") val parentBackdropImageTags: List<String>? = null,
 ) {
     /** Direct playback targets — the single source of truth for both platforms. */
     val isPlayable: Boolean
@@ -96,6 +99,15 @@ data class BaseItem(
     /** Resume position in seconds, 0.0 when unwatched. */
     val resumePositionSeconds: Double
         get() = (userData?.playbackPositionTicks ?: 0L) / 10_000_000.0
+
+    /** Watched fraction 0.0–1.0 for progress bars, null when not started. */
+    val playedFraction: Double?
+        get() {
+            val position = userData?.playbackPositionTicks ?: return null
+            val runtime = runTimeTicks ?: return null
+            if (position <= 0 || runtime <= 0) return null
+            return (position.toDouble() / runtime).coerceIn(0.0, 1.0)
+        }
 
     val isSeries: Boolean
         get() = type == "Series"
