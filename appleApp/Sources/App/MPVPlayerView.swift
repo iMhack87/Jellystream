@@ -261,9 +261,12 @@ struct PlayerScreen: View {
             #endif
         }
         #if os(tvOS)
-        .focusable()
+        // While the panel is open the Focus Engine must own the arrows:
+        // the outer view stops being focusable and stops intercepting moves
+        .focusable(!showTracks)
         .onPlayPauseCommand { model.togglePause() }
         .onMoveCommand { direction in
+            guard !showTracks else { return }
             switch direction {
             case .left: model.seek(to: max(0, model.timePos - 10))
             case .right: model.seek(to: model.timePos + 10)
