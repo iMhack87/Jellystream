@@ -52,7 +52,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    // Keep content clear of the status bar / display cutout (edge-to-edge)
+                    // Keep content clear of status bar, cutout AND keyboard (IME):
+                    // the centered login form deliberately shifts up when typing
                     androidx.compose.foundation.layout.Box(
                         modifier = Modifier.safeDrawingPadding()
                     ) {
@@ -154,7 +155,13 @@ private fun HomeScreen(api: JellyfinApi, session: UserSession) {
     LaunchedEffect(session) {
         try {
             sections = api.getUserViews().map { view ->
-                LibrarySection(view, api.getLatestItems(view.id, 12))
+                // One failing view must not blank the whole home screen
+                val latest = try {
+                    api.getLatestItems(view.id, 12)
+                } catch (e: Exception) {
+                    emptyList()
+                }
+                LibrarySection(view, latest)
             }
         } catch (e: Exception) {
             error = e.message ?: "Failed to load library"

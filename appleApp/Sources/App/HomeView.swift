@@ -42,7 +42,8 @@ struct HomeView: View {
             let views = try await api.getUserViews()
             var result: [LibrarySection] = []
             for view in views {
-                let latest = try await api.getLatestItems(viewId: view.id, limit: 12)
+                // One failing view must not blank the whole home screen
+                let latest = (try? await api.getLatestItems(viewId: view.id, limit: 12)) ?? []
                 result.append(LibrarySection(view: view, latest: latest))
             }
             sections = result
