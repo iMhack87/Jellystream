@@ -11,6 +11,7 @@ struct LibrarySection: Identifiable {
 struct HomeView: View {
     let api: JellyfinApi
     let session: UserSession
+    let onLogout: () -> Void
 
     @State private var sections: [LibrarySection]?
     @State private var error: String?
@@ -51,6 +52,11 @@ struct HomeView: View {
                     showSearch = true
                 } label: {
                     Image(systemName: "magnifyingglass")
+                }
+                Button {
+                    onLogout()
+                } label: {
+                    Image(systemName: "rectangle.portrait.and.arrow.right")
                 }
             }
             #endif

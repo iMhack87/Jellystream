@@ -1,5 +1,6 @@
 package dev.jellystream.android
 
+import android.content.Context
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -23,6 +24,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -49,8 +51,10 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import androidx.compose.ui.platform.LocalContext
 import dev.jellystream.shared.BaseItem
 import dev.jellystream.shared.JellyfinApi
+import dev.jellystream.shared.PersistedSession
 import dev.jellystream.shared.UserSession
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -79,15 +83,37 @@ private sealed interface Screen {
     data object Search : Screen
 }
 
+/** App-private storage for the session blob (shared module owns the format). */
+private class SessionStore(context: Context) {
+    private val prefs = context.getSharedPreferences("jellystream_session", Context.MODE_PRIVATE)
+
+    fun load(): PersistedSession? =
+        prefs.getString("session", null)?.let { PersistedSession.fromJson(it) }
+
+    fun save(persisted: PersistedSession) {
+        prefs.edit().putString("session", persisted.toJson()).apply()
+    }
+
+    fun clear() {
+        prefs.edit().remove("session").apply()
+    }
+}
+
 @Composable
 private fun JellystreamApp() {
+    val context = LocalContext.current
+    val store = remember { SessionStore(context) }
+    val persisted = remember { store.load() }
+    // Jellyfin ties sessions to DeviceId — reuse the stored one so the server
+    // sees the same device across launches
+    val deviceId = remember { persisted?.deviceId ?: UUID.randomUUID().toString() }
     val api = remember {
         JellyfinApi(
             deviceName = Build.MODEL,
-            deviceId = UUID.randomUUID().toString(),
-        )
+            deviceId = deviceId,
+        ).also { restored -> persisted?.let { restored.restoreSession(it.session) } }
     }
-    var session by remember { mutableStateOf<UserSession?>(null) }
+    var session by remember { mutableStateOf(persisted?.session) }
     var playing by remember { mutableStateOf<BaseItem?>(null) }
     val backStack = remember { mutableStateListOf<Screen>(Screen.Home) }
 
@@ -99,7 +125,13 @@ private fun JellystreamApp() {
     }
 
     when (val s = session) {
-        null -> LoginScreen(api, onLoggedIn = { session = it })
+        null -> LoginScreen(
+            api,
+            onLoggedIn = { logged ->
+                session = logged
+                store.save(PersistedSession(deviceId, logged))
+            },
+        )
         // The player is an overlay: the navigation stack stays composed
         // underneath so its state survives closing the player
         else -> Box {
@@ -109,6 +141,13 @@ private fun JellystreamApp() {
                     session = s,
                     onOpen = ::open,
                     onSearch = { backStack.add(Screen.Search) },
+                    onLogout = {
+                        api.logout()
+                        store.clear()
+                        backStack.clear()
+                        backStack.add(Screen.Home)
+                        session = null
+                    },
                 )
                 is Screen.Detail -> DetailScreen(api, screen.item, onPlay = { playing = it })
                 is Screen.Series -> SeriesScreen(api, screen.item, onPlay = { playing = it })
@@ -198,6 +237,7 @@ private fun HomeScreen(
     session: UserSession,
     onOpen: (BaseItem) -> Unit,
     onSearch: () -> Unit,
+    onLogout: () -> Unit,
 ) {
     var sections by remember { mutableStateOf<List<LibrarySection>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -253,8 +293,16 @@ private fun HomeScreen(
                         session.serverName ?: "Jellyfin",
                         style = MaterialTheme.typography.headlineMedium,
                     )
-                    IconButton(onClick = onSearch) {
-                        Icon(Icons.Default.Search, contentDescription = "Search")
+                    Row {
+                        IconButton(onClick = onSearch) {
+                            Icon(Icons.Default.Search, contentDescription = "Search")
+                        }
+                        IconButton(onClick = onLogout) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ExitToApp,
+                                contentDescription = "Log out",
+                            )
+                        }
                     }
                 }
             }

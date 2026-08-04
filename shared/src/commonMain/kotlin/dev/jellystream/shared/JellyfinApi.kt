@@ -33,6 +33,15 @@ class JellyfinApi(
     val currentSession: UserSession?
         get() = session
 
+    /** Adopts a session restored from persistent storage. */
+    fun restoreSession(restored: UserSession) {
+        session = restored
+    }
+
+    fun logout() {
+        session = null
+    }
+
     /** Unauthenticated ping — validates the URL points at a Jellyfin server. */
     suspend fun getPublicSystemInfo(serverUrl: String): PublicSystemInfo =
         http.get("${normalizeServerUrl(serverUrl)}/System/Info/Public").body()
