@@ -383,7 +383,14 @@ struct PlayerScreen: View {
             switch direction {
             case .left: model.seek(to: max(0, model.timePos - 10))
             case .right: model.seek(to: model.timePos + 10)
-            case .down: showTracks = true
+            case .down:
+                // Only open the panel when it has something to show: an
+                // empty panel renders no focusable button, and with the
+                // outer view .focusable(false) the Focus Engine would have
+                // nowhere to land — the user must never end up stuck
+                if model.audioTracks.count > 1 || !model.subtitleTracks.isEmpty {
+                    showTracks = true
+                }
             default: break
             }
         }
