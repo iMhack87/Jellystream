@@ -1,0 +1,35 @@
+# macOS
+.DS_Store
+
+# Environment / secrets
+.env
+.env.*
+*.local
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Xcode / iOS / tvOS
+DerivedData/
+xcuserdata/
+*.xcuserstate
+*.ipa
+Pods/
+.build/
+
+# Android / Gradle
+.gradle/
+build/
+local.properties
+*.apk
+*.aab
+captures/
+
+# Node (tooling)
+node_modules/
+
+# Logs & temp
+*.log
+tmp/
