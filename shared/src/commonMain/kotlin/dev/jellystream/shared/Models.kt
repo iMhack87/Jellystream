@@ -39,7 +39,11 @@ data class UserSession(
     val accessToken: String,
     val userName: String?,
     val serverName: String?,
-)
+) {
+    /** Stable identity of a profile: one account on one server. */
+    val profileKey: String
+        get() = "$baseUrl|$userId"
+}
 
 /**
  * What survives an app restart: the session plus the device id it was
@@ -56,7 +60,7 @@ data class PersistedSession(
 
     /** Stable identity of a profile: one account on one server. */
     val profileKey: String
-        get() = "${session.baseUrl}|${session.userId}"
+        get() = session.profileKey
 
     /** What the profile picker shows. */
     val displayName: String

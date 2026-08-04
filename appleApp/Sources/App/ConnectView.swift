@@ -147,9 +147,7 @@ final class AppModel: ObservableObject {
         // Best-effort server revocation; local state clears now
         Task { [api] in try? await api.logout() }
         if let current = session,
-           let profile = profiles.first(where: {
-               $0.session.baseUrl == current.baseUrl && $0.session.userId == current.userId
-           }) {
+           let profile = profiles.first(where: { $0.profileKey == current.profileKey }) {
             let updated = PersistedProfiles(profiles: profiles).withoutProfile(profile: profile)
             profiles = updated.profiles
             SessionStore.saveProfiles(updated)
