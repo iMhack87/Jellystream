@@ -2,6 +2,10 @@ name: Jellystream
 options:
   bundleIdPrefix: dev.jellystream
   createIntermediateGroups: true
+packages:
+  MPVKit:
+    url: https://github.com/mpvkit/MPVKit.git
+    majorVersion: 0.39.0
 settings:
   base:
     SWIFT_VERSION: "5.10"
@@ -18,6 +22,8 @@ targets:
     dependencies:
       - framework: ../shared/build/XCFrameworks/debug/Shared.xcframework
         embed: false
+      - package: MPVKit
+        product: MPVKit
     info:
       path: Sources/iOS/Info.plist
       properties:
@@ -40,6 +46,8 @@ targets:
     dependencies:
       - framework: ../shared/build/XCFrameworks/debug/Shared.xcframework
         embed: false
+      - package: MPVKit
+        product: MPVKit
     info:
       path: Sources/tvOS/Info.plist
       properties:
