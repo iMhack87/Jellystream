@@ -33,7 +33,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full rationale.
 
 ## Status
 
-🚧 **Early days.** Stack and license are decided; scaffolding is next. Nothing to install yet.
+🚧 **Early days.** The monorepo compiles on all targets (Android APK, iOS, tvOS) with a minimal server-connect screen backed by the shared KMP module. No player yet. See [docs/BUILDING.md](docs/BUILDING.md) to build.
 
 ## License
 

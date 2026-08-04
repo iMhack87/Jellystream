@@ -1,0 +1,52 @@
+name: Jellystream
+options:
+  bundleIdPrefix: dev.jellystream
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    # The shared KMP framework ships arm64-only simulator slices (no Intel)
+    "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
+    "EXCLUDED_ARCHS[sdk=appletvsimulator*]": x86_64
+targets:
+  Jellystream:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - Sources/App
+    dependencies:
+      - framework: ../shared/build/XCFrameworks/debug/Shared.xcframework
+        embed: false
+    info:
+      path: Sources/iOS/Info.plist
+      properties:
+        CFBundleDisplayName: Jellystream
+        UILaunchScreen: {}
+        # Self-hosted Jellyfin servers are frequently plain http on the LAN
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.jellystream.app
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_STYLE: Automatic
+  JellystreamTV:
+    type: application
+    platform: tvOS
+    deploymentTarget: "17.0"
+    sources:
+      - Sources/App
+    dependencies:
+      - framework: ../shared/build/XCFrameworks/debug/Shared.xcframework
+        embed: false
+    info:
+      path: Sources/tvOS/Info.plist
+      properties:
+        CFBundleDisplayName: Jellystream
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.jellystream.tv
+        CODE_SIGN_STYLE: Automatic
