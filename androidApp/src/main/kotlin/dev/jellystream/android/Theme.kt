@@ -12,6 +12,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
@@ -19,6 +20,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 
 /** Cinematic palette: deep blacks, white CTAs, muted grays — Apple TV+ mood. */
 object CinemaColors {
@@ -66,17 +68,19 @@ fun JellystreamTheme(content: @Composable () -> Unit) {
 /**
  * tvOS-style D-pad focus: scale + white ring when focused. Inert on touch
  * devices (nothing gains keyboard focus there), so one code path serves
- * both phone and Android TV.
+ * both phone and Android TV. `composed` keeps the state local to the
+ * modifier so focus changes don't recompose the whole item; zIndex lifts
+ * the focused card above its later-drawn siblings.
  */
-@Composable
-fun Modifier.dpadFocusEffect(shape: Shape = RoundedCornerShape(12.dp)): Modifier {
+fun Modifier.dpadFocusEffect(shape: Shape = RoundedCornerShape(12.dp)): Modifier = composed {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
         targetValue = if (focused) 1.08f else 1f,
         label = "dpadFocusScale",
     )
-    return this
+    this
         .onFocusChanged { focused = it.isFocused }
+        .zIndex(if (focused) 1f else 0f)
         .graphicsLayer {
             scaleX = scale
             scaleY = scale

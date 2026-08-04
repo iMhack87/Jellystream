@@ -212,6 +212,9 @@ struct MPVPlayerView: UIViewRepresentable {
 struct PlayerScreen: View {
     @StateObject private var model: PlayerModel
     @Environment(\.dismiss) private var dismiss
+    #if os(tvOS)
+    @State private var showTracks = false
+    #endif
 
     init(api: JellyfinApi, item: BaseItem) {
         _model = StateObject(wrappedValue: PlayerModel(api: api, item: item))
@@ -223,6 +226,17 @@ struct PlayerScreen: View {
                 .ignoresSafeArea()
 
             #if !os(tvOS)
+            // Double-tap left/right halves: ±10 s (under the controls layer)
+            HStack(spacing: 0) {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture(count: 2) { model.seek(to: max(0, model.timePos - 10)) }
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture(count: 2) { model.seek(to: model.timePos + 10) }
+            }
+            .ignoresSafeArea()
+
             VStack {
                 HStack {
                     Button {
@@ -239,10 +253,34 @@ struct PlayerScreen: View {
             }
             .padding()
             #endif
+
+            #if os(tvOS)
+            if showTracks {
+                TrackPanel(model: model)
+            }
+            #endif
         }
         #if os(tvOS)
+        // While the panel is open the Focus Engine must own the arrows:
+        // the outer view stops being focusable and stops intercepting moves
+        .focusable(!showTracks)
         .onPlayPauseCommand { model.togglePause() }
-        .onExitCommand { dismiss() }
+        .onMoveCommand { direction in
+            guard !showTracks else { return }
+            switch direction {
+            case .left: model.seek(to: max(0, model.timePos - 10))
+            case .right: model.seek(to: model.timePos + 10)
+            case .down: showTracks = true
+            default: break
+            }
+        }
+        .onExitCommand {
+            if showTracks {
+                showTracks = false
+            } else {
+                dismiss()
+            }
+        }
         #endif
         .onDisappear { model.shutdown() }
     }
@@ -334,3 +372,52 @@ struct PlayerScreen: View {
     }
     #endif
 }
+
+#if os(tvOS)
+/** Focusable audio/subtitle picker — swipe down on the remote to open. */
+private struct TrackPanel: View {
+    @ObservedObject var model: PlayerModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            if model.audioTracks.count > 1 {
+                Text("Audio").font(.headline)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 16) {
+                        ForEach(model.audioTracks) { track in
+                            Button(track.label) {
+                                model.selectAudioTrack(id: track.id)
+                            }
+                            .foregroundStyle(track.selected ? .primary : .secondary)
+                        }
+                    }
+                }
+            }
+            if !model.subtitleTracks.isEmpty {
+                Text("Subtitles").font(.headline)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 16) {
+                        Button("Off") {
+                            model.selectSubtitleTrack(id: nil)
+                        }
+                        .foregroundStyle(
+                            model.subtitleTracks.contains(where: \.selected) ? .secondary : .primary
+                        )
+                        ForEach(model.subtitleTracks) { track in
+                            Button(track.label) {
+                                model.selectSubtitleTrack(id: track.id)
+                            }
+                            .foregroundStyle(track.selected ? .primary : .secondary)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(48)
+        .frame(maxWidth: .infinity)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
+        .padding(60)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+    }
+}
+#endif
