@@ -10,7 +10,13 @@ import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 
 /**
  * Minimal Jellyfin API client. Grows with the app; anything protocol-related
@@ -207,11 +213,126 @@ class JellyfinApi(
      * all, served as-is (`static=true`) — the player does the work, not the
      * server. No token in the URL (it would leak into proxy/player logs):
      * players must send [streamAuthorizationHeader] as the Authorization
-     * header. Transcoding fallback comes later via PlaybackInfo.
+     * header.
      */
     fun streamUrl(item: BaseItem): String? {
         val s = session ?: return null
         return "${s.baseUrl}/Videos/${item.id}/stream?static=true"
+    }
+
+    /**
+     * Negotiates playback with the server: Direct Play when the device
+     * profile allows it, otherwise the server's HLS transcode; also surfaces
+     * external text subtitles the player must side-load.
+     */
+    suspend fun getPlaybackPlan(item: BaseItem, forceTranscode: Boolean = false): PlaybackPlan {
+        val s = requireSession()
+        val fallback = PlaybackPlan(
+            url = "${s.baseUrl}/Videos/${item.id}/stream?static=true",
+            isTranscode = false,
+            externalSubtitles = emptyList(),
+        )
+        val info: PlaybackInfoResponse = try {
+            http.post("${s.baseUrl}/Items/${item.id}/PlaybackInfo") {
+                header("Authorization", authorizationHeader(s.accessToken))
+                contentType(ContentType.Application.Json)
+                setBody(playbackInfoBody(s.userId, forceTranscode))
+            }.body()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // A server that can't negotiate must not block playback
+            return fallback
+        }
+        val source = info.mediaSources.firstOrNull() ?: return fallback
+
+        val subtitles = source.mediaStreams.orEmpty()
+            .filter { it.type == "Subtitle" && it.isExternal && it.deliveryUrl != null }
+            .map {
+                ExternalSubtitle(
+                    url = "${s.baseUrl}${it.deliveryUrl}",
+                    language = it.language,
+                    title = it.displayTitle,
+                    codec = it.codec,
+                )
+            }
+
+        val transcodingUrl = source.transcodingUrl
+        return if ((!source.supportsDirectPlay || forceTranscode) && transcodingUrl != null) {
+            PlaybackPlan(
+                url = "${s.baseUrl}$transcodingUrl",
+                isTranscode = true,
+                externalSubtitles = subtitles,
+            )
+        } else {
+            val mediaSourceParam = source.id?.let { "&mediaSourceId=$it" } ?: ""
+            PlaybackPlan(
+                url = "${s.baseUrl}/Videos/${item.id}/stream?static=true$mediaSourceParam",
+                isTranscode = false,
+                externalSubtitles = subtitles,
+            )
+        }
+    }
+
+    private fun playbackInfoBody(userId: String, forceTranscode: Boolean): JsonObject =
+        buildJsonObject {
+            put("UserId", userId)
+            put("AutoOpenLiveStream", false)
+            if (forceTranscode) {
+                put("EnableDirectPlay", false)
+                put("EnableDirectStream", false)
+            }
+            put("DeviceProfile", deviceProfile())
+        }
+
+    /**
+     * What our players can Direct Play. Both engines are FFmpeg-backed, so
+     * the profile is broad; the server only transcodes what falls outside it.
+     */
+    private fun deviceProfile(): JsonObject = buildJsonObject {
+        putJsonArray("DirectPlayProfiles") {
+            add(
+                buildJsonObject {
+                    put("Type", "Video")
+                    put("Container", "mkv,mp4,m4v,webm,mov,ts,avi")
+                    put("VideoCodec", "h264,hevc,vp9,av1,mpeg4,mpeg2video,vc1")
+                    put(
+                        "AudioCodec",
+                        "aac,mp3,ac3,eac3,opus,flac,vorbis,dts,truehd,pcm_s16le,pcm_s24le",
+                    )
+                }
+            )
+        }
+        putJsonArray("TranscodingProfiles") {
+            add(
+                buildJsonObject {
+                    put("Type", "Video")
+                    put("Container", "ts")
+                    put("Protocol", "hls")
+                    put("VideoCodec", "h264")
+                    put("AudioCodec", "aac")
+                    put("Context", "Streaming")
+                }
+            )
+        }
+        putJsonArray("SubtitleProfiles") {
+            for (format in listOf("srt", "subrip", "vtt", "webvtt")) {
+                add(
+                    buildJsonObject {
+                        put("Format", format)
+                        put("Method", "External")
+                    }
+                )
+            }
+            for (format in listOf("ass", "ssa", "pgssub", "dvdsub", "subrip")) {
+                add(
+                    buildJsonObject {
+                        put("Format", format)
+                        put("Method", "Embed")
+                    }
+                )
+            }
+        }
     }
 
     /**
