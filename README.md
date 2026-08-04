@@ -16,10 +16,10 @@ Jellystream aims to play **every format your Jellyfin server can throw at it, na
 
 | Platform | Status |
 |----------|--------|
-| Android | 🚧 In progress — login, library browsing, direct playback (Media3) |
-| Android TV | 🚧 In progress — login, library browsing, direct playback (Media3) |
-| iOS / iPadOS | 🚧 In progress — login, library browsing, direct playback (mpv) |
-| Apple TV (tvOS) | 🚧 In progress — login, library browsing, direct playback (mpv) |
+| Android | 🚧 In progress — browse, search, series, Direct Play (Media3), resume |
+| Android TV | 🚧 In progress — browse, search, series, Direct Play (Media3), resume |
+| iOS / iPadOS | 🚧 In progress — browse, search, series, Direct Play (mpv), resume |
+| Apple TV (tvOS) | 🚧 In progress — browse, series, Direct Play (mpv), resume |
 
 ## Tech stack
 
@@ -33,7 +33,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full rationale.
 
 ## Status
 
-🚧 **Early days.** All four targets build and run: login against any Jellyfin server (https→http fallback for LAN servers), browse your library views, and tap a movie/episode to **Direct Play the original file** — mpv+FFmpeg on Apple platforms (the all-formats engine), Media3/ExoPlayer on Android (FFmpeg audio decoders coming next). Playback has pause/seek controls, **resumes where you left off**, and reports progress to the server ("continue watching", cross-device). No audio/subtitle track selection UI yet. See [docs/BUILDING.md](docs/BUILDING.md) to build.
+🚧 **Early days.** All four targets build and run: login against any Jellyfin server (https→http fallback for LAN servers), a home screen with **Continue Watching** and **Next Up**, movie/episode detail pages, **series browsing** (seasons and episodes), and **search**. Tap anything playable to **Direct Play the original file** — mpv+FFmpeg on Apple platforms (the all-formats engine), Media3/ExoPlayer on Android (FFmpeg audio decoders coming next) — with pause/seek controls, **audio/subtitle track selection**, cross-device resume, and progress reporting to the server. See [docs/BUILDING.md](docs/BUILDING.md) to build.
 
 ## License
 

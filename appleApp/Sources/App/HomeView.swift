@@ -2,9 +2,10 @@ import SwiftUI
 import Shared
 
 struct LibrarySection: Identifiable {
-    let view: BaseItem
-    let latest: [BaseItem]
-    var id: String { view.id }
+    let title: String
+    let key: String
+    let items: [BaseItem]
+    var id: String { key }
 }
 
 struct HomeView: View {
@@ -13,7 +14,7 @@ struct HomeView: View {
 
     @State private var sections: [LibrarySection]?
     @State private var error: String?
-    @State private var playingItem: BaseItem?
+    @State private var showSearch = false
 
     var body: some View {
         NavigationStack {
@@ -24,7 +25,7 @@ struct HomeView: View {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 32) {
                             ForEach(sections) { section in
-                                LibraryRow(api: api, section: section, onPlay: play)
+                                LibraryRow(api: api, section: section)
                             }
                         }
                         .padding(.vertical)
@@ -34,25 +35,43 @@ struct HomeView: View {
                 }
             }
             .navigationTitle(session.serverName ?? "Jellyfin")
-            .task { await load() }
-            .fullScreenCover(item: $playingItem) { item in
-                PlayerScreen(api: api, item: item)
+            .navigationDestination(for: BaseItem.self) { item in
+                if item.isSeries {
+                    SeriesView(api: api, series: item)
+                } else {
+                    DetailView(api: api, item: item)
+                }
             }
+            .navigationDestination(isPresented: $showSearch) {
+                SearchView(api: api)
+            }
+            #if !os(tvOS)
+            .toolbar {
+                Button {
+                    showSearch = true
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                }
+            }
+            #endif
+            .task { await load() }
         }
-    }
-
-    private func play(_ item: BaseItem) {
-        playingItem = item
     }
 
     private func load() async {
         do {
-            let views = try await api.getUserViews()
             var result: [LibrarySection] = []
+            if let resume = try? await api.getResumeItems(limit: 12), !resume.isEmpty {
+                result.append(LibrarySection(title: "Continue Watching", key: "resume", items: resume))
+            }
+            if let nextUp = try? await api.getNextUp(limit: 12), !nextUp.isEmpty {
+                result.append(LibrarySection(title: "Next Up", key: "nextup", items: nextUp))
+            }
+            let views = try await api.getUserViews()
             for view in views {
                 // One failing view must not blank the whole home screen
                 let latest = (try? await api.getLatestItems(viewId: view.id, limit: 12)) ?? []
-                result.append(LibrarySection(view: view, latest: latest))
+                result.append(LibrarySection(title: view.name ?? "Library", key: view.id, items: latest))
             }
             sections = result
         } catch {
@@ -66,24 +85,21 @@ extension BaseItem: @retroactive Identifiable {}
 private struct LibraryRow: View {
     let api: JellyfinApi
     let section: LibrarySection
-    let onPlay: (BaseItem) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(section.view.name ?? "Library")
+            Text(section.title)
                 .font(.title2.bold())
                 .padding(.horizontal)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 16) {
-                    ForEach(section.latest, id: \.id) { item in
-                        Button {
-                            onPlay(item)
-                        } label: {
+                    ForEach(section.items, id: \.id) { item in
+                        NavigationLink(value: item) {
                             PosterCard(api: api, item: item)
                         }
                         .buttonStyle(.plain)
-                        .disabled(!item.isPlayable)
+                        .disabled(!item.isPlayable && !item.isSeries)
                     }
                 }
                 .padding(.horizontal)
