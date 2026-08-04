@@ -3,9 +3,10 @@ import Combine
 import Shared
 import Libmpv
 
-/// Minimal libmpv player: renders into a CAMetalLayer via gpu-next/Vulkan
-/// (MoltenVK, shipped by MPVKit). mpv+FFmpeg is what gives Jellystream
-/// Direct Play of virtually every format on Apple platforms.
+// Minimal libmpv player: renders into a CAMetalLayer via gpu-next/Vulkan
+// (MoltenVK, shipped by MPVKit). mpv+FFmpeg is what gives Jellystream
+// Direct Play of virtually every format on Apple platforms.
+
 /// One entry of mpv's `track-list` property (JSON).
 struct MediaTrack: Decodable, Identifiable {
     let id: Int
@@ -129,13 +130,14 @@ final class PlayerModel: ObservableObject {
         duration = getDouble("duration")
         isPaused = getFlag("pause")
 
+        tickCount += 1
+
         // Track list settles once demuxing starts; refresh every 2 s
         if tickCount % 4 == 0 {
             refreshTracks()
         }
 
         // Every 10 ticks (~5 s), tell the server where we are
-        tickCount += 1
         if tickCount % 10 == 0 {
             let ticks = JellyfinApi.companion.secondsToTicks(seconds: timePos)
             let paused = isPaused
