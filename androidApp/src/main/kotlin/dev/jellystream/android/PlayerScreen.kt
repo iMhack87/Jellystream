@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
@@ -97,6 +99,14 @@ fun PlayerScreen(api: JellyfinApi, item: BaseItem, onClose: () -> Unit) {
                 )
             }
         }
+
+        // Visible exit affordance, same as iOS — the back gesture works too
+        FloatingNavButton(
+            onClick = onClose,
+            icon = Icons.Default.Close,
+            contentDescription = "Close player",
+            modifier = Modifier.align(Alignment.TopStart),
+        )
     }
 }
 

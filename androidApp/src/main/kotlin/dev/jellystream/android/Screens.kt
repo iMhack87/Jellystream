@@ -1,6 +1,7 @@
 package dev.jellystream.android
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,10 +20,13 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -53,18 +57,50 @@ import dev.jellystream.shared.JellyfinApi
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 
+/**
+ * Floating circular back/close control — iOS-style, visible affordance on
+ * every pushed screen (the system back gesture still works too). Focusable
+ * for the TV D-pad.
+ */
 @Composable
-fun DetailScreen(api: JellyfinApi, item: BaseItem, onPlay: (BaseItem) -> Unit) {
+fun FloatingNavButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    icon: androidx.compose.ui.graphics.vector.ImageVector = Icons.AutoMirrored.Filled.ArrowBack,
+    contentDescription: String = "Back",
+) {
+    Box(
+        modifier = modifier
+            .statusBarsPadding()
+            .padding(12.dp)
+            .dpadFocusEffect(CircleShape)
+            .clip(CircleShape)
+            .background(Color.Black.copy(alpha = 0.55f))
+            .clickable { onClick() }
+            .padding(10.dp),
+    ) {
+        Icon(icon, contentDescription = contentDescription, tint = Color.White)
+    }
+}
+
+@Composable
+fun DetailScreen(
+    api: JellyfinApi,
+    item: BaseItem,
+    onPlay: (BaseItem) -> Unit,
+    onBack: () -> Unit,
+) {
     var full by remember { mutableStateOf(item) }
     LaunchedEffect(item.id) {
         runCatching { full = api.getItem(item.id) }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState()),
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState()),
+        ) {
         // Full-bleed backdrop melting into the background
         Box(
             modifier = Modifier
@@ -158,11 +194,19 @@ fun DetailScreen(api: JellyfinApi, item: BaseItem, onPlay: (BaseItem) -> Unit) {
                 )
             }
         }
+        }
+
+        FloatingNavButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart))
     }
 }
 
 @Composable
-fun SeriesScreen(api: JellyfinApi, series: BaseItem, onPlay: (BaseItem) -> Unit) {
+fun SeriesScreen(
+    api: JellyfinApi,
+    series: BaseItem,
+    onPlay: (BaseItem) -> Unit,
+    onBack: () -> Unit,
+) {
     var seasons by remember { mutableStateOf<List<BaseItem>>(emptyList()) }
     var selectedSeason by remember { mutableStateOf<BaseItem?>(null) }
     var episodes by remember { mutableStateOf<List<BaseItem>>(emptyList()) }
@@ -188,7 +232,13 @@ fun SeriesScreen(api: JellyfinApi, series: BaseItem, onPlay: (BaseItem) -> Unit)
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            Text(series.name ?: "", style = MaterialTheme.typography.headlineMedium)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                FloatingNavButton(onClick = onBack)
+                Text(series.name ?: "", style = MaterialTheme.typography.headlineMedium)
+            }
         }
         error?.let {
             item { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -250,7 +300,7 @@ private fun EpisodeRow(api: JellyfinApi, episode: BaseItem, onPlay: (BaseItem) -
 }
 
 @Composable
-fun SearchScreen(api: JellyfinApi, onOpen: (BaseItem) -> Unit) {
+fun SearchScreen(api: JellyfinApi, onOpen: (BaseItem) -> Unit, onBack: () -> Unit) {
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<BaseItem>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
@@ -274,13 +324,19 @@ fun SearchScreen(api: JellyfinApi, onOpen: (BaseItem) -> Unit) {
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
-            label = { Text("Search") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            FloatingNavButton(onClick = onBack)
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                label = { Text("Search") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
         if (searching) {
             CircularProgressIndicator(modifier = Modifier.padding(16.dp).size(24.dp))
         }
