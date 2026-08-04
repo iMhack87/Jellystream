@@ -16,10 +16,10 @@ Jellystream aims to play **every format your Jellyfin server can throw at it, na
 
 | Platform | Status |
 |----------|--------|
-| Android | 🧭 Planned |
-| Android TV | 🧭 Planned |
-| iOS / iPadOS | 🧭 Planned |
-| Apple TV (tvOS) | 🧭 Planned |
+| Android | 🚧 Scaffolded — builds, server connect screen |
+| Android TV | 🚧 Scaffolded — builds, server connect screen |
+| iOS / iPadOS | 🚧 Scaffolded — builds, server connect screen |
+| Apple TV (tvOS) | 🚧 Scaffolded — builds, server connect screen |
 
 ## Tech stack
 

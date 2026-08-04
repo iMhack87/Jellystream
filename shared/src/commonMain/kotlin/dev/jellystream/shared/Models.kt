@@ -24,6 +24,12 @@ data class AuthenticationResult(
     @SerialName("User") val user: UserDto? = null,
 )
 
+/** A server URL that answered `System/Info/Public`, plus what it answered. */
+data class ResolvedServer(
+    val baseUrl: String,
+    val info: PublicSystemInfo,
+)
+
 @Serializable
 internal data class AuthenticateByNameRequest(
     @SerialName("Username") val username: String,

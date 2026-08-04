@@ -32,6 +32,25 @@ class JellyfinApi(
     suspend fun getPublicSystemInfo(serverUrl: String): PublicSystemInfo =
         http.get("${normalizeServerUrl(serverUrl)}/System/Info/Public").body()
 
+    /**
+     * Resolves what the user typed into a working server base URL.
+     * Scheme-less input is tried as https first, then http — self-hosted
+     * Jellyfin servers on the LAN are frequently plain http.
+     */
+    suspend fun resolveServer(rawUrl: String): ResolvedServer {
+        var lastError: Exception? = null
+        for (candidate in candidateUrls(rawUrl)) {
+            try {
+                val info: PublicSystemInfo =
+                    http.get("$candidate/System/Info/Public").body()
+                return ResolvedServer(baseUrl = candidate, info = info)
+            } catch (e: Exception) {
+                lastError = e
+            }
+        }
+        throw lastError ?: IllegalArgumentException("No server URL candidates for '$rawUrl'")
+    }
+
     suspend fun authenticateByName(
         serverUrl: String,
         username: String,
@@ -58,6 +77,16 @@ class JellyfinApi(
                 trimmed
             } else {
                 "https://$trimmed"
+            }
+        }
+
+        /** Ordered connection attempts for what the user typed. */
+        fun candidateUrls(raw: String): List<String> {
+            val trimmed = raw.trim().trimEnd('/')
+            return if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+                listOf(trimmed)
+            } else {
+                listOf("https://$trimmed", "http://$trimmed")
             }
         }
     }

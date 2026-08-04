@@ -1,18 +1,19 @@
 import SwiftUI
 import Shared
 
-struct ConnectView: View {
-    private enum Status {
+/// Owns the JellyfinApi instance: a @StateObject is created once per view
+/// lifetime, unlike stored properties on the View struct which are
+/// re-initialized on every state change.
+@MainActor
+final class ConnectModel: ObservableObject {
+    enum Status {
         case idle
         case loading
         case success(String)
         case failure(String)
     }
 
-    @State private var serverUrl = ""
-    @State private var username = ""
-    @State private var password = ""
-    @State private var status: Status = .idle
+    @Published var status: Status = .idle
 
     private let api = JellyfinApi(
         clientName: "Jellystream",
@@ -20,6 +21,39 @@ struct ConnectView: View {
         deviceName: UIDevice.current.name,
         deviceId: UUID().uuidString
     )
+
+    var isLoading: Bool {
+        if case .loading = status { return true }
+        return false
+    }
+
+    func connect(serverUrl: String, username: String, password: String) {
+        status = .loading
+        Task {
+            do {
+                let server = try await api.resolveServer(rawUrl: serverUrl)
+                let auth = try await api.authenticateByName(
+                    serverUrl: server.baseUrl,
+                    username: username,
+                    password: password
+                )
+                let name = server.info.serverName ?? "Jellyfin"
+                let version = server.info.version ?? "?"
+                let user = auth.user?.name ?? username
+                status = .success("Connected to \(name) (v\(version)) as \(user)")
+            } catch {
+                status = .failure(error.localizedDescription)
+            }
+        }
+    }
+}
+
+struct ConnectView: View {
+    @StateObject private var model = ConnectModel()
+
+    @State private var serverUrl = ""
+    @State private var username = ""
+    @State private var password = ""
 
     var body: some View {
         NavigationStack {
@@ -34,11 +68,17 @@ struct ConnectView: View {
                 }
 
                 Section {
-                    Button("Connect", action: connect)
-                        .disabled(isLoading || serverUrl.isEmpty)
+                    Button("Connect") {
+                        model.connect(
+                            serverUrl: serverUrl,
+                            username: username,
+                            password: password
+                        )
+                    }
+                    .disabled(model.isLoading || serverUrl.isEmpty)
                 }
 
-                switch status {
+                switch model.status {
                 case .idle:
                     EmptyView()
                 case .loading:
@@ -50,31 +90,6 @@ struct ConnectView: View {
                 }
             }
             .navigationTitle("Jellystream")
-        }
-    }
-
-    private var isLoading: Bool {
-        if case .loading = status { return true }
-        return false
-    }
-
-    private func connect() {
-        status = .loading
-        Task {
-            do {
-                let info = try await api.getPublicSystemInfo(serverUrl: serverUrl)
-                let auth = try await api.authenticateByName(
-                    serverUrl: serverUrl,
-                    username: username,
-                    password: password
-                )
-                let server = info.serverName ?? "Jellyfin"
-                let version = info.version ?? "?"
-                let user = auth.user?.name ?? username
-                status = .success("Connected to \(server) (v\(version)) as \(user)")
-            } catch {
-                status = .failure(error.localizedDescription)
-            }
         }
     }
 }

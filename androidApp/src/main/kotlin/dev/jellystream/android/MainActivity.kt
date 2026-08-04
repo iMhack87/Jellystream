@@ -103,11 +103,11 @@ private fun ConnectScreen() {
                 scope.launch {
                     state = ConnectState.Loading
                     state = try {
-                        val info = api.getPublicSystemInfo(serverUrl)
-                        val auth = api.authenticateByName(serverUrl, username, password)
+                        val server = api.resolveServer(serverUrl)
+                        val auth = api.authenticateByName(server.baseUrl, username, password)
                         ConnectState.Success(
-                            "Connected to ${info.serverName ?: "Jellyfin"} " +
-                                "(v${info.version ?: "?"}) as ${auth.user?.name ?: username}"
+                            "Connected to ${server.info.serverName ?: "Jellyfin"} " +
+                                "(v${server.info.version ?: "?"}) as ${auth.user?.name ?: username}"
                         )
                     } catch (e: Exception) {
                         ConnectState.Error(e.message ?: "Connection failed")
