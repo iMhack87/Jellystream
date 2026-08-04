@@ -238,6 +238,21 @@ class JellyfinApi(
         ).items
     }
 
+    /**
+     * Intro/outro/etc. markers for one item (Jellyfin 10.10+). Empty when
+     * the server has no segment provider (e.g. no Intro Skipper plugin) —
+     * and on any failure: segments are progressive enhancement, they must
+     * never break playback.
+     */
+    suspend fun getMediaSegments(itemId: String): List<MediaSegment> =
+        try {
+            authGet<MediaSegmentsResult>("MediaSegments/$itemId").items
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            emptyList()
+        }
+
     private suspend inline fun <reified T> authGet(
         path: String,
         vararg params: Pair<String, String>,

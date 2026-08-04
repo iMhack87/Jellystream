@@ -1,16 +1,26 @@
 package dev.jellystream.android
 
+import android.content.pm.PackageManager
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -22,7 +32,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -38,7 +53,9 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import dev.jellystream.shared.BaseItem
 import dev.jellystream.shared.JellyfinApi
+import dev.jellystream.shared.MediaSegment
 import dev.jellystream.shared.PlaybackPlan
+import dev.jellystream.shared.SkipSegments
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -58,9 +75,16 @@ fun PlayerScreen(api: JellyfinApi, item: BaseItem, onClose: () -> Unit) {
     var plan by remember { mutableStateOf<PlaybackPlan?>(null) }
     var forceTranscode by remember { mutableStateOf(false) }
     var failed by remember { mutableStateOf(false) }
+    var segments by remember { mutableStateOf<List<MediaSegment>>(emptyList()) }
 
     LaunchedEffect(item.id, forceTranscode) {
         plan = api.getPlaybackPlan(item, forceTranscode)
+    }
+
+    // Intro/outro markers — getMediaSegments returns [] when the server has
+    // no segment provider, so the button simply never shows
+    LaunchedEffect(item.id) {
+        segments = api.getMediaSegments(item.id)
     }
 
     BackHandler(onBack = onClose)
@@ -88,6 +112,7 @@ fun PlayerScreen(api: JellyfinApi, item: BaseItem, onClose: () -> Unit) {
                     api = api,
                     item = item,
                     plan = currentPlan,
+                    segments = segments,
                     onDirectPlayFailed = {
                         if (!currentPlan.isTranscode && !forceTranscode) {
                             forceTranscode = true
@@ -116,9 +141,14 @@ private fun PlayerSurface(
     api: JellyfinApi,
     item: BaseItem,
     plan: PlaybackPlan,
+    segments: List<MediaSegment>,
     onDirectPlayFailed: () -> Unit,
 ) {
     val context = LocalContext.current
+
+    // An HLS transcode starts at the resume point (StartTimeTicks), so the
+    // player clock is window-relative; segments are in media time
+    val positionOffsetSeconds = if (plan.isTranscode) item.resumePositionSeconds else 0.0
 
     val player = remember {
         // Token travels as a header, never in the URL (proxy/player logs)
@@ -190,18 +220,104 @@ private fun PlayerSurface(
         }
     }
 
-    AndroidView(
-        modifier = Modifier.fillMaxSize().background(Color.Black),
-        factory = { ctx ->
-            PlayerView(ctx).apply {
-                this.player = player
-                keepScreenOn = true
-                // Opens the built-in text-track dialog; audio tracks live
-                // under the settings (gear) button of the same controller
-                setShowSubtitleButton(true)
-            }
-        },
+    // Which segment the playhead is inside right now (null = no button)
+    var activeSegment by remember { mutableStateOf<MediaSegment?>(null) }
+    LaunchedEffect(segments) {
+        while (true) {
+            val mediaPositionSeconds =
+                positionOffsetSeconds + player.currentPosition / 1000.0
+            activeSegment = SkipSegments.activeSegment(segments, mediaPositionSeconds)
+            delay(250)
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize().background(Color.Black),
+            factory = { ctx ->
+                PlayerView(ctx).apply {
+                    this.player = player
+                    keepScreenOn = true
+                    // Opens the built-in text-track dialog; audio tracks live
+                    // under the settings (gear) button of the same controller
+                    setShowSubtitleButton(true)
+                }
+            },
+        )
+
+        // Retains the last segment so the label survives the exit animation
+        var shownSegment by remember { mutableStateOf<MediaSegment?>(null) }
+        activeSegment?.let { shownSegment = it }
+
+        AnimatedVisibility(
+            visible = activeSegment != null,
+            enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
+            exit = fadeOut(),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(horizontal = 28.dp, vertical = 56.dp),
+        ) {
+            SkipSegmentButton(
+                label = if (shownSegment?.isOutro == true) "Skip Credits" else "Skip Intro",
+                onClick = {
+                    val segment = activeSegment ?: return@SkipSegmentButton
+                    activeSegment = null
+                    player.seekTo(
+                        ((segment.endSeconds - positionOffsetSeconds) * 1000).toLong()
+                    )
+                },
+            )
+        }
+    }
+}
+
+/**
+ * Apple TV+-style skip pill: translucent over the video, inverts to a solid
+ * white capsule when the D-pad focuses it. Grabs focus on appear on TV so
+ * a single center press skips; inert focus-wise on touch devices.
+ */
+@Composable
+private fun SkipSegmentButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val isTv = remember {
+        context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+    }
+    val focusRequester = remember { FocusRequester() }
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue = if (focused) 1.08f else 1f,
+        label = "skipFocusScale",
     )
+
+    LaunchedEffect(Unit) {
+        if (isTv) focusRequester.requestFocus()
+    }
+
+    Box(
+        modifier = modifier
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(CircleShape)
+            .background(if (focused) Color.White else Color.Black.copy(alpha = 0.55f))
+            // Subtle ring so the pill reads over letterboxed (black) video
+            .border(1.dp, Color.White.copy(alpha = 0.3f), CircleShape)
+            .focusRequester(focusRequester)
+            .onFocusChanged { focused = it.isFocused }
+            .clickable { onClick() }
+            .padding(horizontal = 22.dp, vertical = 12.dp),
+    ) {
+        Text(
+            text = label,
+            color = if (focused) Color.Black else Color.White,
+            style = MaterialTheme.typography.titleMedium,
+        )
+    }
 }
 
 private fun subtitleMimeType(codec: String?): String? = when (codec?.lowercase()) {

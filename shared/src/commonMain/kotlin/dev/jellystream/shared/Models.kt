@@ -192,6 +192,62 @@ internal data class PlaybackReport(
     @SerialName("PlaySessionId") val playSessionId: String? = null,
 )
 
+/**
+ * One entry of `GET /MediaSegments/{itemId}` (Jellyfin 10.10+), fed
+ * server-side by plugins like Intro Skipper. Type is kept as the wire
+ * string — servers may grow new values ("Recap", "Commercial", …).
+ */
+@Serializable
+data class MediaSegment(
+    @SerialName("Id") val id: String? = null,
+    @SerialName("ItemId") val itemId: String? = null,
+    @SerialName("Type") val type: String? = null,
+    @SerialName("StartTicks") val startTicks: Long? = null,
+    @SerialName("EndTicks") val endTicks: Long? = null,
+) {
+    val startSeconds: Double
+        get() = (startTicks ?: 0L) / 10_000_000.0
+
+    val endSeconds: Double
+        get() = (endTicks ?: 0L) / 10_000_000.0
+
+    val isIntro: Boolean get() = type == "Intro"
+    val isOutro: Boolean get() = type == "Outro"
+}
+
+@Serializable
+data class MediaSegmentsResult(
+    @SerialName("Items") val items: List<MediaSegment> = emptyList(),
+)
+
+/**
+ * When to offer the skip button — the single decision point for all four
+ * platforms. A segment is skippable while playback sits inside it, minus
+ * a tail margin (skipping the last moments is pointless and the button
+ * would flash), and only if it is long enough to be worth a button.
+ */
+object SkipSegments {
+    /** Segments shorter than this never get a button. */
+    const val MIN_SEGMENT_SECONDS = 5.0
+
+    /** The button hides this many seconds before the segment ends. */
+    const val TAIL_MARGIN_SECONDS = 2.0
+
+    /**
+     * The Intro/Outro segment the given playback position is inside, or
+     * null when no button should be shown. [positionSeconds] must be in
+     * media time (add the transcode window offset when the server started
+     * the stream mid-file).
+     */
+    fun activeSegment(segments: List<MediaSegment>, positionSeconds: Double): MediaSegment? =
+        segments.firstOrNull { segment ->
+            (segment.isIntro || segment.isOutro) &&
+                segment.endSeconds - segment.startSeconds >= MIN_SEGMENT_SECONDS &&
+                positionSeconds >= segment.startSeconds &&
+                positionSeconds < segment.endSeconds - TAIL_MARGIN_SECONDS
+        }
+}
+
 @Serializable
 data class ItemsResult(
     @SerialName("Items") val items: List<BaseItem> = emptyList(),

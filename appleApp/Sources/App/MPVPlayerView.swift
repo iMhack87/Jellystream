@@ -31,12 +31,22 @@ final class PlayerModel: ObservableObject {
     @Published var isPaused = false
     @Published var audioTracks: [MediaTrack] = []
     @Published var subtitleTracks: [MediaTrack] = []
+    /// The Intro/Outro segment the playhead is inside — drives the skip button.
+    @Published var skipSegment: MediaSegment?
 
     private var mpv: OpaquePointer?
     private var timer: Timer?
     private var tickCount = 0
     /// Lets the server terminate the transcode job on Stopped.
     private var playSessionId: String?
+    /// Intro/outro markers in media time (empty when the server has none).
+    private var segments: [MediaSegment] = []
+    /// HLS transcodes start at the resume point, so mpv's clock is
+    /// window-relative; media time = timePos + this offset.
+    private var positionOffset: Double = 0
+    /// Segment just skipped — suppressed until the playhead leaves it, so
+    /// the button doesn't flash while mpv processes the seek.
+    private var skippedSegment: MediaSegment?
 
     init(api: JellyfinApi, item: BaseItem) {
         self.api = api
@@ -89,6 +99,13 @@ final class PlayerModel: ObservableObject {
                 return
             }
             self.playSessionId = plan?.playSessionId
+            if plan?.isTranscode == true {
+                // The server already starts the HLS window at the resume
+                // point (StartTimeTicks); seeking again would double-apply
+                // it. Same guard as the Android player.
+                self.setString("start", "none")
+                self.positionOffset = self.item.resumePositionSeconds
+            }
             self.command("loadfile", url)
             for subtitle in plan?.externalSubtitles ?? [] {
                 self.command("sub-add", subtitle.url, "auto")
@@ -97,6 +114,14 @@ final class PlayerModel: ObservableObject {
                 itemId: self.item.id,
                 playSessionId: plan?.playSessionId
             )
+        }
+
+        // Intro/outro markers — [] when the server has no segment provider,
+        // so the skip button simply never shows
+        Task { [weak self] in
+            guard let self else { return }
+            let segments = (try? await self.api.getMediaSegments(itemId: self.item.id)) ?? []
+            self.segments = segments
         }
 
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
@@ -129,6 +154,14 @@ final class PlayerModel: ObservableObject {
         command("seek", String(seconds), "absolute")
     }
 
+    /// Jumps past the segment the skip button is currently showing for.
+    func skipCurrentSegment() {
+        guard let segment = skipSegment else { return }
+        skippedSegment = segment
+        skipSegment = nil
+        seek(to: segment.endSeconds - positionOffset)
+    }
+
     func selectAudioTrack(id: Int) {
         setString("aid", String(id))
         refreshTracks()
@@ -153,6 +186,19 @@ final class PlayerModel: ObservableObject {
         timePos = getDouble("time-pos")
         duration = getDouble("duration")
         isPaused = getFlag("pause")
+
+        var active = SkipSegments.shared.activeSegment(
+            segments: segments,
+            positionSeconds: positionOffset + timePos
+        )
+        if active == nil {
+            skippedSegment = nil
+        } else if active === skippedSegment {
+            active = nil
+        }
+        if active !== skipSegment {
+            skipSegment = active
+        }
 
         tickCount += 1
 
@@ -235,6 +281,7 @@ struct PlayerScreen: View {
     @Environment(\.dismiss) private var dismiss
     #if os(tvOS)
     @State private var showTracks = false
+    @FocusState private var skipFocused: Bool
     #endif
 
     init(api: JellyfinApi, item: BaseItem) {
@@ -280,7 +327,45 @@ struct PlayerScreen: View {
                 TrackPanel(model: model)
             }
             #endif
+
+            // Apple TV+-style timed skip pill: appears when playback enters
+            // an Intro/Outro segment, gone when the segment ends
+            if let segment = model.skipSegment {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        Button {
+                            model.skipCurrentSegment()
+                        } label: {
+                            Text(segment.isOutro ? "Skip Credits" : "Skip Intro")
+                                .font(.headline)
+                                #if !os(tvOS)
+                                .padding(.horizontal, 22)
+                                .padding(.vertical, 12)
+                                .background(.black.opacity(0.55), in: Capsule())
+                                .foregroundStyle(.white)
+                                .overlay(Capsule().strokeBorder(.white.opacity(0.3)))
+                                #endif
+                        }
+                        #if os(tvOS)
+                        .focused($skipFocused)
+                        #else
+                        .buttonStyle(.plain)
+                        #endif
+                    }
+                }
+                #if os(tvOS)
+                .padding(.horizontal, 80)
+                .padding(.bottom, 60)
+                #else
+                .padding(.horizontal, 24)
+                .padding(.bottom, 76)
+                #endif
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
         }
+        .animation(.easeInOut(duration: 0.25), value: model.skipSegment == nil)
         #if os(tvOS)
         // While the panel is open the Focus Engine must own the arrows:
         // the outer view stops being focusable and stops intercepting moves
@@ -301,6 +386,11 @@ struct PlayerScreen: View {
             } else {
                 dismiss()
             }
+        }
+        // The pill grabs focus on appear so one center press skips; when it
+        // leaves, focus falls back to the player view (arrows seek again)
+        .onChange(of: model.skipSegment == nil) { _, isNil in
+            skipFocused = !isNil
         }
         #endif
         .onDisappear { model.shutdown() }
