@@ -28,6 +28,11 @@ class JellyfinApi(
         }
     }
 
+    private var session: UserSession? = null
+
+    val currentSession: UserSession?
+        get() = session
+
     /** Unauthenticated ping — validates the URL points at a Jellyfin server. */
     suspend fun getPublicSystemInfo(serverUrl: String): PublicSystemInfo =
         http.get("${normalizeServerUrl(serverUrl)}/System/Info/Public").body()
@@ -61,6 +66,56 @@ class JellyfinApi(
             contentType(ContentType.Application.Json)
             setBody(AuthenticateByNameRequest(username, password))
         }.body()
+
+    /**
+     * Resolves the server, authenticates, and stores the session used by all
+     * subsequent authenticated calls (views, latest items, images).
+     */
+    suspend fun login(rawUrl: String, username: String, password: String): UserSession {
+        val server = resolveServer(rawUrl)
+        val auth = authenticateByName(server.baseUrl, username, password)
+        val token = auth.accessToken
+            ?: throw IllegalStateException("Server did not return an access token")
+        val userId = auth.user?.id
+            ?: throw IllegalStateException("Server did not return a user id")
+        return UserSession(
+            baseUrl = server.baseUrl,
+            userId = userId,
+            accessToken = token,
+            userName = auth.user?.name,
+            serverName = server.info.serverName,
+        ).also { session = it }
+    }
+
+    /** The user's library views (Movies, Shows, …). Requires [login]. */
+    suspend fun getUserViews(): List<BaseItem> {
+        val s = requireSession()
+        val result: ItemsResult = http.get("${s.baseUrl}/UserViews") {
+            url.parameters.append("userId", s.userId)
+            header("Authorization", authorizationHeader(s.accessToken))
+        }.body()
+        return result.items
+    }
+
+    /** Latest additions in one view (or across the library if [viewId] is null). */
+    suspend fun getLatestItems(viewId: String?, limit: Int = 16): List<BaseItem> {
+        val s = requireSession()
+        return http.get("${s.baseUrl}/Users/${s.userId}/Items/Latest") {
+            url.parameters.append("limit", limit.toString())
+            if (viewId != null) url.parameters.append("parentId", viewId)
+            header("Authorization", authorizationHeader(s.accessToken))
+        }.body()
+    }
+
+    /** Primary image URL for an item, or null if the item has none. */
+    fun imageUrl(item: BaseItem, maxWidth: Int = 400): String? {
+        val s = session ?: return null
+        val tag = item.imageTags?.get("Primary") ?: return null
+        return "${s.baseUrl}/Items/${item.id}/Images/Primary?maxWidth=$maxWidth&tag=$tag"
+    }
+
+    private fun requireSession(): UserSession =
+        session ?: throw IllegalStateException("Not logged in — call login() first")
 
     private fun authorizationHeader(accessToken: String?): String = buildString {
         append("MediaBrowser Client=\"$clientName\"")

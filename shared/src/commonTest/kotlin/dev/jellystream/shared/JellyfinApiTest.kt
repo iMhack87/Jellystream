@@ -2,6 +2,7 @@ package dev.jellystream.shared
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 
 class JellyfinApiTest {
 
@@ -27,5 +28,12 @@ class JellyfinApiTest {
             listOf("https://jf.example.com"),
             JellyfinApi.candidateUrls("https://jf.example.com/"),
         )
+    }
+
+    @Test
+    fun imageUrl_isNullWithoutSession() {
+        val api = JellyfinApi(deviceName = "test", deviceId = "test-id")
+        val item = BaseItem(id = "abc", imageTags = mapOf("Primary" to "tag1"))
+        assertNull(api.imageUrl(item, 400))
     }
 }

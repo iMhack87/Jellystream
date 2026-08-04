@@ -5,17 +5,17 @@ import Shared
 /// lifetime, unlike stored properties on the View struct which are
 /// re-initialized on every state change.
 @MainActor
-final class ConnectModel: ObservableObject {
+final class AppModel: ObservableObject {
     enum Status {
         case idle
         case loading
-        case success(String)
         case failure(String)
     }
 
     @Published var status: Status = .idle
+    @Published var session: UserSession?
 
-    private let api = JellyfinApi(
+    let api = JellyfinApi(
         clientName: "Jellystream",
         clientVersion: "0.1.0",
         deviceName: UIDevice.current.name,
@@ -27,20 +27,17 @@ final class ConnectModel: ObservableObject {
         return false
     }
 
-    func connect(serverUrl: String, username: String, password: String) {
+    func login(serverUrl: String, username: String, password: String) {
         status = .loading
         Task {
             do {
-                let server = try await api.resolveServer(rawUrl: serverUrl)
-                let auth = try await api.authenticateByName(
-                    serverUrl: server.baseUrl,
+                let session = try await api.login(
+                    rawUrl: serverUrl,
                     username: username,
                     password: password
                 )
-                let name = server.info.serverName ?? "Jellyfin"
-                let version = server.info.version ?? "?"
-                let user = auth.user?.name ?? username
-                status = .success("Connected to \(name) (v\(version)) as \(user)")
+                self.session = session
+                status = .idle
             } catch {
                 status = .failure(error.localizedDescription)
             }
@@ -48,8 +45,20 @@ final class ConnectModel: ObservableObject {
     }
 }
 
+struct RootView: View {
+    @StateObject private var model = AppModel()
+
+    var body: some View {
+        if let session = model.session {
+            HomeView(api: model.api, session: session)
+        } else {
+            ConnectView(model: model)
+        }
+    }
+}
+
 struct ConnectView: View {
-    @StateObject private var model = ConnectModel()
+    @ObservedObject var model: AppModel
 
     @State private var serverUrl = ""
     @State private var username = ""
@@ -62,14 +71,16 @@ struct ConnectView: View {
                     TextField("Server URL", text: $serverUrl)
                         .textContentType(.URL)
                         .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
                     TextField("Username", text: $username)
                         .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
                     SecureField("Password", text: $password)
                 }
 
                 Section {
                     Button("Connect") {
-                        model.connect(
+                        model.login(
                             serverUrl: serverUrl,
                             username: username,
                             password: password
@@ -83,8 +94,6 @@ struct ConnectView: View {
                     EmptyView()
                 case .loading:
                     ProgressView()
-                case .success(let message):
-                    Text(message).foregroundStyle(.green)
                 case .failure(let message):
                     Text(message).foregroundStyle(.red)
                 }
