@@ -106,6 +106,17 @@ struct HomeView: View {
 
 extension BaseItem: @retroactive Identifiable {}
 
+/** Platform metrics: TV needs generous margins and focus breathing room. */
+enum HomeMetrics {
+    #if os(tvOS)
+    static let edgePadding: CGFloat = 64
+    static let rowVerticalPadding: CGFloat = 30
+    #else
+    static let edgePadding: CGFloat = 24
+    static let rowVerticalPadding: CGFloat = 12
+    #endif
+}
+
 /** Full-bleed backdrop melting into black — the ATV+ hero. */
 private struct HeroSection: View {
     let api: JellyfinApi
@@ -152,10 +163,14 @@ private struct HeroSection: View {
                 }
 
                 #if os(tvOS)
-                let ctaSpacing: CGFloat = 48
+                let ctaSpacing: CGFloat = 24
                 #else
                 let ctaSpacing: CGFloat = 14
                 #endif
+                // On tvOS the system button style draws the pill itself
+                // (visible even unfocused, focus lift accounted for in
+                // layout) — a .plain button would be bare text over the
+                // backdrop and its focus effect would overlap the meta line
                 HStack(spacing: ctaSpacing) {
                     if item.isPlayable {
                         Button(action: onPlay) {
@@ -171,22 +186,29 @@ private struct HeroSection: View {
                             .foregroundStyle(.black)
                             #endif
                         }
+                        #if !os(tvOS)
                         .buttonStyle(.plain)
+                        #endif
                     }
 
                     NavigationLink(value: item) {
                         Text("Details")
                             .font(.headline)
-                            .foregroundStyle(.white)
                             #if !os(tvOS)
+                            .foregroundStyle(.white)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 10)
                             #endif
                     }
+                    #if !os(tvOS)
                     .buttonStyle(.plain)
+                    #endif
                 }
+                #if os(tvOS)
+                .padding(.top, 12)
+                #endif
             }
-            .padding(24)
+            .padding(HomeMetrics.edgePadding)
         }
         .frame(height: heroHeight)
     }
@@ -220,7 +242,7 @@ private struct ContinueRow: View {
             Text(section.title)
                 .font(.title2.bold())
                 .foregroundStyle(.white)
-                .padding(.horizontal, 24)
+                .padding(.horizontal, HomeMetrics.edgePadding)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 16) {
@@ -272,8 +294,8 @@ private struct ContinueRow: View {
                         #endif
                     }
                 }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 12)
+                .padding(.horizontal, HomeMetrics.edgePadding)
+                .padding(.vertical, HomeMetrics.rowVerticalPadding)
             }
         }
     }
@@ -288,7 +310,7 @@ private struct LibraryRow: View {
             Text(section.title)
                 .font(.title2.bold())
                 .foregroundStyle(.white)
-                .padding(.horizontal, 24)
+                .padding(.horizontal, HomeMetrics.edgePadding)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 16) {
@@ -304,8 +326,8 @@ private struct LibraryRow: View {
                         #endif
                     }
                 }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 12)
+                .padding(.horizontal, HomeMetrics.edgePadding)
+                .padding(.vertical, HomeMetrics.rowVerticalPadding)
             }
         }
     }
