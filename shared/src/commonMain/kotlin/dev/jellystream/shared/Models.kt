@@ -2,6 +2,7 @@ package dev.jellystream.shared
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
 @Serializable
 data class PublicSystemInfo(
@@ -31,6 +32,7 @@ data class ResolvedServer(
 )
 
 /** An authenticated session against one server. */
+@Serializable
 data class UserSession(
     val baseUrl: String,
     val userId: String,
@@ -38,6 +40,29 @@ data class UserSession(
     val userName: String?,
     val serverName: String?,
 )
+
+/**
+ * What survives an app restart: the session plus the device id it was
+ * created with (Jellyfin ties sessions to DeviceId, so it must be stable).
+ * Platforms persist the JSON blob (Keychain on Apple, private prefs on
+ * Android) — the wire format lives here, never in platform code.
+ */
+@Serializable
+data class PersistedSession(
+    val deviceId: String,
+    val session: UserSession,
+) {
+    fun toJson(): String = Json.encodeToString(serializer(), this)
+
+    companion object {
+        fun fromJson(json: String): PersistedSession? =
+            try {
+                Json { ignoreUnknownKeys = true }.decodeFromString(serializer(), json)
+            } catch (e: Exception) {
+                null
+            }
+    }
+}
 
 @Serializable
 data class UserItemData(

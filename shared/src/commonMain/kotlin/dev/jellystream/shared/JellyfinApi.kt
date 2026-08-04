@@ -33,6 +33,33 @@ class JellyfinApi(
     val currentSession: UserSession?
         get() = session
 
+    /** Adopts a session restored from persistent storage. */
+    fun restoreSession(restored: UserSession) {
+        session = restored
+    }
+
+    /**
+     * Best-effort server-side revocation, then drops the local session.
+     * Network failure is swallowed: the local state must clear regardless.
+     */
+    suspend fun logout() {
+        val s = session
+        session = null
+        if (s != null) {
+            try {
+                http.post("${s.baseUrl}/Sessions/Logout") {
+                    header("Authorization", authorizationHeader(s.accessToken))
+                }
+            } catch (e: Exception) {
+                // Token stays valid server-side; nothing more we can do offline
+            }
+        }
+    }
+
+    /** Authorization header value for platform players (stream requests). */
+    fun streamAuthorizationHeader(): String? =
+        session?.let { authorizationHeader(it.accessToken) }
+
     /** Unauthenticated ping — validates the URL points at a Jellyfin server. */
     suspend fun getPublicSystemInfo(serverUrl: String): PublicSystemInfo =
         http.get("${normalizeServerUrl(serverUrl)}/System/Info/Public").body()
@@ -178,11 +205,13 @@ class JellyfinApi(
     /**
      * Direct-stream URL for a playable item: the original file, container and
      * all, served as-is (`static=true`) — the player does the work, not the
-     * server. Transcoding fallback comes later via PlaybackInfo.
+     * server. No token in the URL (it would leak into proxy/player logs):
+     * players must send [streamAuthorizationHeader] as the Authorization
+     * header. Transcoding fallback comes later via PlaybackInfo.
      */
     fun streamUrl(item: BaseItem): String? {
         val s = session ?: return null
-        return "${s.baseUrl}/Videos/${item.id}/stream?static=true&api_key=${s.accessToken}"
+        return "${s.baseUrl}/Videos/${item.id}/stream?static=true"
     }
 
     /** Primary image URL for an item, or null if the item has none. */

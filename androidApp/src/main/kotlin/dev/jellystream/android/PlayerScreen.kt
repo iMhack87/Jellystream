@@ -12,7 +12,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import dev.jellystream.shared.BaseItem
 import dev.jellystream.shared.JellyfinApi
@@ -29,6 +32,7 @@ import kotlinx.coroutines.launch
  */
 private val playbackReportScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+@androidx.annotation.OptIn(UnstableApi::class)
 @Composable
 fun PlayerScreen(api: JellyfinApi, item: BaseItem, onClose: () -> Unit) {
     val context = LocalContext.current
@@ -40,7 +44,16 @@ fun PlayerScreen(api: JellyfinApi, item: BaseItem, onClose: () -> Unit) {
     }
 
     val player = remember {
-        ExoPlayer.Builder(context).build().apply {
+        // Token travels as a header, never in the URL (proxy/player logs)
+        val dataSourceFactory = DefaultHttpDataSource.Factory().apply {
+            api.streamAuthorizationHeader()?.let {
+                setDefaultRequestProperties(mapOf("Authorization" to it))
+            }
+        }
+        ExoPlayer.Builder(context)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
+            .build()
+            .apply {
             setMediaItem(MediaItem.fromUri(streamUrl))
             prepare()
             val resumeMs = (item.resumePositionSeconds * 1000).toLong()

@@ -15,16 +15,37 @@ final class AppModel: ObservableObject {
     @Published var status: Status = .idle
     @Published var session: UserSession?
 
-    let api = JellyfinApi(
-        clientName: "Jellystream",
-        clientVersion: "0.1.0",
-        deviceName: UIDevice.current.name,
-        deviceId: UUID().uuidString
-    )
+    let api: JellyfinApi
+    private let deviceId: String
+
+    init() {
+        let persisted = SessionStore.load()
+        // Jellyfin ties sessions to DeviceId — reuse the stored one so the
+        // server sees the same device across launches
+        let deviceId = persisted?.deviceId ?? UUID().uuidString
+        self.deviceId = deviceId
+        api = JellyfinApi(
+            clientName: "Jellystream",
+            clientVersion: "0.1.0",
+            deviceName: UIDevice.current.name,
+            deviceId: deviceId
+        )
+        if let persisted {
+            api.restoreSession(restored: persisted.session)
+            session = persisted.session
+        }
+    }
 
     var isLoading: Bool {
         if case .loading = status { return true }
         return false
+    }
+
+    func logout() {
+        // Best-effort server revocation; local state clears now
+        Task { [api] in try? await api.logout() }
+        SessionStore.clear()
+        session = nil
     }
 
     func login(serverUrl: String, username: String, password: String) {
@@ -36,6 +57,7 @@ final class AppModel: ObservableObject {
                     username: username,
                     password: password
                 )
+                SessionStore.save(PersistedSession(deviceId: deviceId, session: session))
                 self.session = session
                 status = .idle
             } catch {
@@ -50,7 +72,7 @@ struct RootView: View {
 
     var body: some View {
         if let session = model.session {
-            HomeView(api: model.api, session: session)
+            HomeView(api: model.api, session: session, onLogout: { model.logout() })
         } else {
             ConnectView(model: model)
         }
