@@ -7,7 +7,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,12 +24,17 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
@@ -41,6 +48,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -60,6 +68,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import dev.jellystream.shared.BaseItem
 import dev.jellystream.shared.JellyfinApi
+import dev.jellystream.shared.PersistedProfiles
 import dev.jellystream.shared.PersistedSession
 import dev.jellystream.shared.UserSession
 import kotlinx.coroutines.CancellationException
@@ -91,19 +100,29 @@ private sealed interface Screen {
     data object Search : Screen
 }
 
-/** App-private storage for the session blob (shared module owns the format). */
+/** App-private storage for the profiles blob (shared module owns the format). */
 private class SessionStore(context: Context) {
     private val prefs = context.getSharedPreferences("jellystream_session", Context.MODE_PRIVATE)
 
-    fun load(): PersistedSession? =
-        prefs.getString("session", null)?.let { PersistedSession.fromJson(it) }
-
-    fun save(persisted: PersistedSession) {
-        prefs.edit().putString("session", persisted.toJson()).apply()
+    fun loadProfiles(): PersistedProfiles {
+        prefs.getString("profiles", null)
+            ?.let { PersistedProfiles.fromJson(it) }
+            ?.let { return it }
+        // Pre-profiles installs stored a single session — adopt it as the
+        // first profile so nobody has to log in again after updating
+        prefs.getString("session", null)
+            ?.let { PersistedSession.fromJson(it) }
+            ?.let { legacy ->
+                val migrated = PersistedProfiles(listOf(legacy))
+                saveProfiles(migrated)
+                prefs.edit().remove("session").apply()
+                return migrated
+            }
+        return PersistedProfiles(emptyList())
     }
 
-    fun clear() {
-        prefs.edit().remove("session").apply()
+    fun saveProfiles(profiles: PersistedProfiles) {
+        prefs.edit().putString("profiles", profiles.toJson()).apply()
     }
 }
 
@@ -111,17 +130,76 @@ private class SessionStore(context: Context) {
 private fun JellystreamApp() {
     val context = LocalContext.current
     val store = remember { SessionStore(context) }
-    val persisted = remember { store.load() }
-    // Jellyfin ties sessions to DeviceId — reuse the stored one so the server
-    // sees the same device across launches
-    val deviceId = remember { persisted?.deviceId ?: UUID.randomUUID().toString() }
+    var profiles by remember { mutableStateOf(store.loadProfiles()) }
+    // A single known account enters directly (pre-profiles behavior);
+    // several → "who's watching" picker. After logout, active goes null
+    // and the picker (or login) takes over.
+    var active by remember { mutableStateOf(profiles.profiles.singleOrNull()) }
+    var addingProfile by remember { mutableStateOf(false) }
+
+    val current = active
+    when {
+        current != null ->
+            // key() drops every screen/backstack state on profile switch
+            key(current.profileKey) {
+                SignedInApp(
+                    profile = current,
+                    onLoggedOut = {
+                        profiles = profiles.withoutProfile(current)
+                            .also(store::saveProfiles)
+                        addingProfile = false
+                        active = null
+                    },
+                    // Back to the picker, keeping the account — the only
+                    // path from a single-profile install to a second one
+                    onSwitchProfile = {
+                        addingProfile = false
+                        active = null
+                    },
+                )
+            }
+        profiles.profiles.isEmpty() || addingProfile -> {
+            // New accounts get a fresh DeviceId — two users sharing one
+            // would revoke each other's tokens server-side
+            val loginDeviceId = remember { UUID.randomUUID().toString() }
+            val loginApi = remember {
+                JellyfinApi(deviceName = Build.MODEL, deviceId = loginDeviceId)
+            }
+            LoginScreen(
+                api = loginApi,
+                onLoggedIn = { logged ->
+                    val profile = PersistedSession(loginDeviceId, logged)
+                    profiles = profiles.withProfile(profile).also(store::saveProfiles)
+                    addingProfile = false
+                    active = profile
+                },
+                onCancel = if (profiles.profiles.isEmpty()) {
+                    null
+                } else {
+                    { addingProfile = false }
+                },
+            )
+        }
+        else -> ProfilePickerScreen(
+            profiles = profiles.profiles,
+            onSelect = { active = it },
+            onAdd = { addingProfile = true },
+        )
+    }
+}
+
+@Composable
+private fun SignedInApp(
+    profile: PersistedSession,
+    onLoggedOut: () -> Unit,
+    onSwitchProfile: () -> Unit,
+) {
     val api = remember {
         JellyfinApi(
             deviceName = Build.MODEL,
-            deviceId = deviceId,
-        ).also { restored -> persisted?.let { restored.restoreSession(it.session) } }
+            deviceId = profile.deviceId,
+        ).also { it.restoreSession(profile.session) }
     }
-    var session by remember { mutableStateOf(persisted?.session) }
     var playing by remember { mutableStateOf<BaseItem?>(null) }
     val backStack = remember { mutableStateListOf<Screen>(Screen.Home) }
     val scope = rememberCoroutineScope()
@@ -137,61 +215,160 @@ private fun JellystreamApp() {
         if (backStack.size > 1) backStack.removeAt(backStack.lastIndex)
     }
 
-    when (val s = session) {
-        null -> LoginScreen(
-            api,
-            onLoggedIn = { logged ->
-                session = logged
-                store.save(PersistedSession(deviceId, logged))
-            },
+    // The player is an overlay: the navigation stack stays composed
+    // underneath so its state survives closing the player
+    Box {
+        when (val screen = backStack.last()) {
+            Screen.Home -> HomeScreen(
+                api = api,
+                session = profile.session,
+                onOpen = ::open,
+                onPlay = { playing = it },
+                onSearch = { backStack.add(Screen.Search) },
+                onSwitchProfile = onSwitchProfile,
+                onLogout = {
+                    // Best-effort server revocation; local state clears now
+                    scope.launch { runCatching { api.logout() } }
+                    onLoggedOut()
+                },
+            )
+            is Screen.Detail -> DetailScreen(
+                api,
+                screen.item,
+                onPlay = { playing = it },
+                onBack = ::goBack,
+            )
+            is Screen.Series -> SeriesScreen(
+                api,
+                screen.item,
+                onPlay = { playing = it },
+                onBack = ::goBack,
+            )
+            Screen.Search -> SearchScreen(api, onOpen = ::open, onBack = ::goBack)
+        }
+
+        BackHandler(enabled = backStack.size > 1 && playing == null) {
+            backStack.removeAt(backStack.lastIndex)
+        }
+
+        playing?.let { item ->
+            PlayerScreen(api, item, onClose = { playing = null })
+        }
+    }
+}
+
+/**
+ * ATV+-style "who's watching?" — shown at launch when several accounts are
+ * known and none is active. Selecting enters the profile; the last circle
+ * adds another account without touching the existing ones.
+ */
+@Composable
+private fun ProfilePickerScreen(
+    profiles: List<PersistedSession>,
+    onSelect: (PersistedSession) -> Unit,
+    onAdd: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(36.dp, Alignment.CenterVertically),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("Who's watching?", style = MaterialTheme.typography.headlineLarge)
+
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(28.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            profiles.forEach { profile ->
+                ProfileAvatar(
+                    initial = profile.initial,
+                    title = profile.displayName,
+                    subtitle = profile.serverLabel,
+                    onClick = { onSelect(profile) },
+                )
+            }
+            ProfileAvatar(
+                initial = null,
+                title = "Add Profile",
+                subtitle = null,
+                onClick = onAdd,
+            )
+        }
+    }
+}
+
+/** [initial] letter avatar, or a "+" ring when null (the add button). */
+@Composable
+private fun ProfileAvatar(
+    initial: String?,
+    title: String,
+    subtitle: String?,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.width(132.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(108.dp)
+                .dpadFocusEffect(CircleShape)
+                .clip(CircleShape)
+                .then(
+                    if (initial != null) {
+                        Modifier.background(
+                            Brush.linearGradient(
+                                listOf(Color(0xFF3A3A44), CinemaColors.SurfaceVariant)
+                            )
+                        )
+                    } else {
+                        Modifier.border(2.dp, Color.White.copy(alpha = 0.4f), CircleShape)
+                    }
+                )
+                .clickable { onClick() },
+            contentAlignment = Alignment.Center,
+        ) {
+            if (initial != null) {
+                Text(
+                    initial,
+                    style = MaterialTheme.typography.headlineLarge,
+                    color = Color.White,
+                )
+            } else {
+                Icon(
+                    Icons.Default.Add,
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.7f),
+                    modifier = Modifier.size(44.dp),
+                )
+            }
+        }
+        Text(
+            title,
+            style = MaterialTheme.typography.titleMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
-        // The player is an overlay: the navigation stack stays composed
-        // underneath so its state survives closing the player
-        else -> Box {
-            when (val screen = backStack.last()) {
-                Screen.Home -> HomeScreen(
-                    api = api,
-                    session = s,
-                    onOpen = ::open,
-                    onPlay = { playing = it },
-                    onSearch = { backStack.add(Screen.Search) },
-                    onLogout = {
-                        // Best-effort server revocation; local state clears now
-                        scope.launch { runCatching { api.logout() } }
-                        store.clear()
-                        backStack.clear()
-                        backStack.add(Screen.Home)
-                        session = null
-                    },
-                )
-                is Screen.Detail -> DetailScreen(
-                    api,
-                    screen.item,
-                    onPlay = { playing = it },
-                    onBack = ::goBack,
-                )
-                is Screen.Series -> SeriesScreen(
-                    api,
-                    screen.item,
-                    onPlay = { playing = it },
-                    onBack = ::goBack,
-                )
-                Screen.Search -> SearchScreen(api, onOpen = ::open, onBack = ::goBack)
-            }
-
-            BackHandler(enabled = backStack.size > 1 && playing == null) {
-                backStack.removeAt(backStack.lastIndex)
-            }
-
-            playing?.let { item ->
-                PlayerScreen(api, item, onClose = { playing = null })
-            }
+        if (subtitle != null) {
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = CinemaColors.TextSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
 
 @Composable
-private fun LoginScreen(api: JellyfinApi, onLoggedIn: (UserSession) -> Unit) {
+private fun LoginScreen(
+    api: JellyfinApi,
+    onLoggedIn: (UserSession) -> Unit,
+    onCancel: (() -> Unit)? = null,
+) {
     val scope = rememberCoroutineScope()
     var serverUrl by remember { mutableStateOf("") }
     var username by remember { mutableStateOf("") }
@@ -309,6 +486,17 @@ private fun LoginScreen(api: JellyfinApi, onLoggedIn: (UserSession) -> Unit) {
         if (loading) CircularProgressIndicator()
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
+
+    // Adding a profile from the picker must always offer a way back
+    if (onCancel != null) {
+        BackHandler(onBack = onCancel)
+        Box(modifier = Modifier.fillMaxSize()) {
+            FloatingNavButton(
+                onClick = onCancel,
+                modifier = Modifier.align(Alignment.TopStart),
+            )
+        }
+    }
 }
 
 private data class LibrarySection(val title: String, val key: String, val items: List<BaseItem>)
@@ -320,6 +508,7 @@ private fun HomeScreen(
     onOpen: (BaseItem) -> Unit,
     onPlay: (BaseItem) -> Unit,
     onSearch: () -> Unit,
+    onSwitchProfile: () -> Unit,
     onLogout: () -> Unit,
 ) {
     var sections by remember { mutableStateOf<List<LibrarySection>?>(null) }
@@ -385,6 +574,7 @@ private fun HomeScreen(
                         onOpen = onOpen,
                         onPlay = onPlay,
                         onSearch = onSearch,
+                        onSwitchProfile = onSwitchProfile,
                         onLogout = onLogout,
                     )
                 }
@@ -408,6 +598,7 @@ private fun HeroSection(
     onOpen: (BaseItem) -> Unit,
     onPlay: (BaseItem) -> Unit,
     onSearch: () -> Unit,
+    onSwitchProfile: () -> Unit,
     onLogout: () -> Unit,
 ) {
     Box(
@@ -446,6 +637,15 @@ private fun HeroSection(
         ) {
             IconButton(onClick = onSearch) {
                 Icon(Icons.Default.Search, contentDescription = "Search", tint = Color.White)
+            }
+            // Back to "who's watching" — also the only path from a
+            // single-profile install to adding a second account
+            IconButton(onClick = onSwitchProfile) {
+                Icon(
+                    Icons.Default.AccountCircle,
+                    contentDescription = "Switch profile",
+                    tint = Color.White,
+                )
             }
             IconButton(onClick = onLogout) {
                 Icon(

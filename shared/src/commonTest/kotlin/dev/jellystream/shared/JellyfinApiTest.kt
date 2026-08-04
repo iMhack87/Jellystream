@@ -120,6 +120,73 @@ class JellyfinApiTest {
     }
 
     @Test
+    fun persistedProfiles_roundTripsThroughJson() {
+        val profiles = PersistedProfiles(
+            listOf(
+                PersistedSession(
+                    deviceId = "dev-1",
+                    session = UserSession("http://a:8096", "u1", "t1", "alice", "Server A"),
+                ),
+                PersistedSession(
+                    deviceId = "dev-2",
+                    session = UserSession("http://b:8096", "u2", "t2", "bob", null),
+                ),
+            )
+        )
+        assertEquals(profiles, PersistedProfiles.fromJson(profiles.toJson()))
+        assertNull(PersistedProfiles.fromJson("not json"))
+    }
+
+    @Test
+    fun withProfile_replacesSameServerAndUser() {
+        val original = PersistedSession(
+            deviceId = "dev-1",
+            session = UserSession("http://a:8096", "u1", "old-token", "alice", null),
+        )
+        val renewed = PersistedSession(
+            deviceId = "dev-1b",
+            session = UserSession("http://a:8096", "u1", "new-token", "alice", null),
+        )
+        val other = PersistedSession(
+            deviceId = "dev-2",
+            session = UserSession("http://a:8096", "u2", "t2", "bob", null),
+        )
+
+        val store = PersistedProfiles(emptyList())
+            .withProfile(original)
+            .withProfile(other)
+            .withProfile(renewed) // same server+user as original → replaces it
+
+        assertEquals(2, store.profiles.size)
+        assertEquals(
+            "new-token",
+            store.profiles.first { it.profileKey == renewed.profileKey }.session.accessToken,
+        )
+
+        val afterRemove = store.withoutProfile(other)
+        assertEquals(listOf(renewed), afterRemove.profiles)
+    }
+
+    @Test
+    fun profileLabels_fallBackGracefully() {
+        val named = PersistedSession(
+            deviceId = "d",
+            session = UserSession("https://jf.example.com", "u", "t", "matthieu", "Salon"),
+        )
+        assertEquals("matthieu", named.displayName)
+        assertEquals("Salon", named.serverLabel)
+        assertEquals("M", named.initial)
+
+        val bare = PersistedSession(
+            deviceId = "d",
+            session = UserSession("https://jf.example.com", "u", "t", null, null),
+        )
+        assertEquals("User", bare.displayName)
+        assertEquals("jf.example.com", bare.serverLabel)
+        assertEquals("U", bare.initial)
+    }
+
+    @Test
     fun isPlayable_moviesAndEpisodesOnly() {
         assertEquals(true, BaseItem(id = "a", type = "Movie").isPlayable)
         assertEquals(true, BaseItem(id = "b", type = "Episode").isPlayable)
