@@ -41,4 +41,7 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)
+    // FFmpeg audio decoders (TrueHD, DTS, …) — Jellyfin's published build of
+    // Media3's ffmpeg extension; version must track the media3 version
+    implementation(libs.media3.ffmpeg.decoder)
 }
