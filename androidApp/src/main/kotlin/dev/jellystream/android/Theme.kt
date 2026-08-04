@@ -1,11 +1,23 @@
 package dev.jellystream.android
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /** Cinematic palette: deep blacks, white CTAs, muted grays — Apple TV+ mood. */
@@ -49,4 +61,27 @@ fun JellystreamTheme(content: @Composable () -> Unit) {
         typography = typography,
         content = content,
     )
+}
+
+/**
+ * tvOS-style D-pad focus: scale + white ring when focused. Inert on touch
+ * devices (nothing gains keyboard focus there), so one code path serves
+ * both phone and Android TV.
+ */
+@Composable
+fun Modifier.dpadFocusEffect(shape: Shape = RoundedCornerShape(12.dp)): Modifier {
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue = if (focused) 1.08f else 1f,
+        label = "dpadFocusScale",
+    )
+    return this
+        .onFocusChanged { focused = it.isFocused }
+        .graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+        }
+        .then(
+            if (focused) Modifier.border(3.dp, Color.White, shape) else Modifier
+        )
 }

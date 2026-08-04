@@ -136,6 +136,7 @@ fun DetailScreen(api: JellyfinApi, item: BaseItem, onPlay: (BaseItem) -> Unit) {
                     contentColor = Color.Black,
                 ),
                 shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.dpadFocusEffect(RoundedCornerShape(10.dp)),
             ) {
                 Icon(Icons.Default.PlayArrow, contentDescription = null)
                 Spacer(Modifier.width(6.dp))
@@ -214,6 +215,7 @@ private fun EpisodeRow(api: JellyfinApi, episode: BaseItem, onPlay: (BaseItem) -
     Surface(
         onClick = { onPlay(episode) },
         shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.dpadFocusEffect(RoundedCornerShape(8.dp)),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(8.dp),
@@ -297,7 +299,11 @@ fun SearchScreen(api: JellyfinApi, onOpen: (BaseItem) -> Unit) {
 
 @Composable
 private fun SearchResultCard(api: JellyfinApi, item: BaseItem, onOpen: (BaseItem) -> Unit) {
-    Surface(onClick = { onOpen(item) }, shape = RoundedCornerShape(8.dp)) {
+    Surface(
+        onClick = { onOpen(item) },
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.dpadFocusEffect(RoundedCornerShape(8.dp)),
+    ) {
         Column {
             AsyncImage(
                 model = api.imageUrl(item, 300),

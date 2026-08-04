@@ -414,6 +414,7 @@ private fun HeroSection(
                                 contentColor = Color.Black,
                             ),
                             shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.dpadFocusEffect(RoundedCornerShape(10.dp)),
                         ) {
                             Icon(Icons.Default.PlayArrow, contentDescription = null)
                             Spacer(Modifier.width(6.dp))
@@ -425,6 +426,7 @@ private fun HeroSection(
                         style = MaterialTheme.typography.titleMedium,
                         color = Color.White,
                         modifier = Modifier
+                            .dpadFocusEffect(RoundedCornerShape(10.dp))
                             .clip(RoundedCornerShape(10.dp))
                             .clickable { onOpen(item) }
                             .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -452,6 +454,7 @@ private fun ContinueRow(api: JellyfinApi, section: LibrarySection, onOpen: (Base
                 Column(
                     modifier = Modifier
                         .width(248.dp)
+                        .dpadFocusEffect()
                         .clickable(enabled = item.isPlayable || item.isSeries) { onOpen(item) },
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
@@ -533,6 +536,7 @@ private fun PosterCard(api: JellyfinApi, item: BaseItem, onOpen: (BaseItem) -> U
     Column(
         modifier = Modifier
             .width(132.dp)
+            .dpadFocusEffect(RoundedCornerShape(10.dp))
             .clickable(enabled = item.isPlayable || item.isSeries) { onOpen(item) },
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
