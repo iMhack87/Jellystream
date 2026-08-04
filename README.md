@@ -21,10 +21,20 @@ Jellystream aims to play **every format your Jellyfin server can throw at it, na
 | iOS / iPadOS | 🧭 Planned |
 | Apple TV (tvOS) | 🧭 Planned |
 
+## Tech stack
+
+**Kotlin Multiplatform shared core + native UI and native player on each platform.**
+
+- **Shared (KMP):** Jellyfin API client (Ktor), auth, library, Direct Play decision engine.
+- **Android / Android TV:** Jetpack Compose + Compose for TV, Media3 (ExoPlayer) with FFmpeg audio decoders.
+- **iOS / iPadOS / tvOS:** SwiftUI, MPVKit (mpv + FFmpeg) — the only realistic path to MKV/TrueHD/ASS on Apple platforms.
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full rationale.
+
 ## Status
 
-🚧 **Early days.** The project is at the design stage — architecture and tech stack are being decided. Nothing to install yet.
+🚧 **Early days.** Stack and license are decided; scaffolding is next. Nothing to install yet.
 
 ## License
 
-TBD.
+[MPL-2.0](LICENSE) — the core stays open and free; file-level copyleft keeps improvements open while remaining App Store-compatible (unlike GPL).
