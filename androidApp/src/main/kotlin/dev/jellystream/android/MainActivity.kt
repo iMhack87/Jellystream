@@ -694,7 +694,9 @@ private fun HeroSection(
                                 contentColor = Color.Black,
                             ),
                             shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.dpadFocusEffect(RoundedCornerShape(10.dp)),
+                            modifier = Modifier
+                                .tvDefaultFocus()
+                                .dpadFocusEffect(RoundedCornerShape(10.dp)),
                         ) {
                             Icon(Icons.Default.PlayArrow, contentDescription = null)
                             Spacer(Modifier.width(6.dp))
