@@ -120,6 +120,47 @@ class JellyfinApi(
         ).also { session = it }
     }
 
+    /**
+     * Quick Connect: the TV shows a code, the user approves it from a phone
+     * or the web UI, and the session lands here — no on-screen keyboard.
+     * Returns the initial state (code to display + secret to poll with).
+     */
+    suspend fun initiateQuickConnect(rawUrl: String): Pair<String, QuickConnectState> {
+        val server = resolveServer(rawUrl)
+        val state: QuickConnectState = http.post("${server.baseUrl}/QuickConnect/Initiate") {
+            header("Authorization", authorizationHeader(accessToken = null))
+        }.body()
+        return server.baseUrl to state
+    }
+
+    suspend fun getQuickConnectState(baseUrl: String, secret: String): QuickConnectState =
+        http.get("$baseUrl/QuickConnect/Connect") {
+            url.parameters.append("secret", secret)
+            header("Authorization", authorizationHeader(accessToken = null))
+        }.body()
+
+    /** Exchanges an approved Quick Connect secret for a real session. */
+    suspend fun authenticateWithQuickConnect(baseUrl: String, secret: String): UserSession {
+        val auth: AuthenticationResult =
+            http.post("$baseUrl/Users/AuthenticateWithQuickConnect") {
+                header("Authorization", authorizationHeader(accessToken = null))
+                contentType(ContentType.Application.Json)
+                setBody(QuickConnectAuthRequest(secret))
+            }.body()
+        val token = auth.accessToken
+            ?: throw IllegalStateException("Server did not return an access token")
+        val userId = auth.user?.id
+            ?: throw IllegalStateException("Server did not return a user id")
+        val info = runCatching { getPublicSystemInfo(baseUrl) }.getOrNull()
+        return UserSession(
+            baseUrl = baseUrl,
+            userId = userId,
+            accessToken = token,
+            userName = auth.user?.name,
+            serverName = info?.serverName,
+        ).also { session = it }
+    }
+
     /** The user's library views (Movies, Shows, …). Requires [login]. */
     suspend fun getUserViews(): List<BaseItem> {
         val s = requireSession()

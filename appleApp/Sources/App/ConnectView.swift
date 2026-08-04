@@ -14,6 +14,7 @@ final class AppModel: ObservableObject {
 
     @Published var status: Status = .idle
     @Published var session: UserSession?
+    @Published var quickConnectCode: String?
 
     let api: JellyfinApi
     private let deviceId: String
@@ -39,6 +40,46 @@ final class AppModel: ObservableObject {
     var isLoading: Bool {
         if case .loading = status { return true }
         return false
+    }
+
+    /// Quick Connect: show a code, poll until the user approves it elsewhere.
+    func startQuickConnect(serverUrl: String) {
+        status = .loading
+        quickConnectCode = nil
+        Task {
+            do {
+                // KotlinPair bridges both components as optionals
+                let started = try await api.initiateQuickConnect(rawUrl: serverUrl)
+                guard let baseUrl = started.first as? String,
+                      let initial = started.second as? QuickConnectState
+                else {
+                    status = .failure("Quick Connect is unavailable on this server")
+                    return
+                }
+                quickConnectCode = initial.code
+                var authenticated = initial.authenticated
+                while !authenticated {
+                    try await Task.sleep(nanoseconds: 3_000_000_000)
+                    if Task.isCancelled { return }
+                    let state = try await api.getQuickConnectState(
+                        baseUrl: baseUrl,
+                        secret: initial.secret
+                    )
+                    authenticated = state.authenticated
+                }
+                let session = try await api.authenticateWithQuickConnect(
+                    baseUrl: baseUrl,
+                    secret: initial.secret
+                )
+                SessionStore.save(PersistedSession(deviceId: deviceId, session: session))
+                self.session = session
+                quickConnectCode = nil
+                status = .idle
+            } catch {
+                quickConnectCode = nil
+                status = .failure(error.localizedDescription)
+            }
+        }
     }
 
     func logout() {
@@ -109,6 +150,22 @@ struct ConnectView: View {
                         )
                     }
                     .disabled(model.isLoading || serverUrl.isEmpty)
+
+                    // No on-screen keyboard needed — ideal on Apple TV
+                    Button("Use Quick Connect") {
+                        model.startQuickConnect(serverUrl: serverUrl)
+                    }
+                    .disabled(model.isLoading || serverUrl.isEmpty)
+                }
+
+                if let code = model.quickConnectCode {
+                    Section("Quick Connect") {
+                        Text(code)
+                            .font(.system(.largeTitle, design: .rounded).bold())
+                        Text("Enter this code in Jellyfin on your phone or browser")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 switch model.status {

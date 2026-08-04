@@ -129,6 +129,18 @@ data class BaseItem(
 }
 
 @Serializable
+data class QuickConnectState(
+    @SerialName("Secret") val secret: String,
+    @SerialName("Code") val code: String,
+    @SerialName("Authenticated") val authenticated: Boolean = false,
+)
+
+@Serializable
+internal data class QuickConnectAuthRequest(
+    @SerialName("Secret") val secret: String,
+)
+
+@Serializable
 data class MediaStream(
     @SerialName("Index") val index: Int? = null,
     @SerialName("Type") val type: String? = null,
