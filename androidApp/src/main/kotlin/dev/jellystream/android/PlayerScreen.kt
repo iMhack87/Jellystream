@@ -51,6 +51,12 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
+import androidx.media3.common.C
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
+import androidx.media3.ui.SubtitleView
+import dev.jellystream.shared.LanguageCode
+import dev.jellystream.shared.MediaStream
 import dev.jellystream.shared.BaseItem
 import dev.jellystream.shared.JellyfinApi
 import dev.jellystream.shared.MediaSegment
@@ -148,10 +154,18 @@ private fun PlayerSurface(
     onDirectPlayFailed: () -> Unit,
 ) {
     val context = LocalContext.current
+    val settings = LocalAppSettings.current
+    val subtitleScale = settings.subtitleScale
 
     // Segments are in media time; the plan says where the stream clock
     // starts (transcode windows open at the resume point)
     val positionOffsetSeconds = plan.startOffsetSeconds
+
+    // Decided in shared from this profile's preference and the audio that
+    // will play; null means "start with subtitles off"
+    val desiredSubtitle = remember(plan, settings) {
+        settings.chooseSubtitle(plan.subtitleStreams, plan.audioLanguage)
+    }
 
     val player = remember {
         // Token travels as a header, never in the URL (proxy/player logs)
@@ -190,6 +204,18 @@ private fun PlayerSurface(
                 addListener(object : Player.Listener {
                     override fun onPlayerError(error: PlaybackException) {
                         onDirectPlayFailed()
+                    }
+
+                    // The track list only exists once demuxing has started,
+                    // which is why the default is applied here and not at
+                    // build time. Applied once: after that the track panel
+                    // belongs to the viewer.
+                    private var defaultApplied = false
+
+                    override fun onTracksChanged(tracks: Tracks) {
+                        if (defaultApplied || tracks.groups.isEmpty()) return
+                        defaultApplied = true
+                        applySubtitleDefault(this@apply, tracks, desiredSubtitle)
                     }
                 })
             }
@@ -251,6 +277,11 @@ private fun PlayerSurface(
                     // Opens the built-in text-track dialog; audio tracks live
                     // under the settings (gear) button of the same controller
                     setShowSubtitleButton(true)
+                    // Fraction of the viewport height, so one setting reads
+                    // the same on a phone and across the room on a TV
+                    subtitleView?.setFractionalTextSize(
+                        SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * subtitleScale.toFloat()
+                    )
                 }
             },
         )
@@ -328,6 +359,51 @@ private fun SkipSegmentButton(
             style = MaterialTheme.typography.titleMedium,
         )
     }
+}
+
+/**
+ * Switches on the track the shared picker chose, or leaves subtitles off.
+ *
+ * Media3 selects text by preference, not by Jellyfin stream index, so the
+ * match is made on what both sides actually carry: the language, and
+ * whether the track is forced. Side-loaded external subtitles land in the
+ * same list, tagged with the language we gave their configuration.
+ */
+private fun applySubtitleDefault(
+    player: Player,
+    tracks: Tracks,
+    desired: MediaStream?,
+) {
+    val base = player.trackSelectionParameters.buildUpon()
+    if (desired == null) {
+        // Off, not "whatever ExoPlayer would have picked"
+        player.trackSelectionParameters = base
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+            .build()
+        return
+    }
+    val group = tracks.groups
+        .filter { it.type == C.TRACK_TYPE_TEXT }
+        .firstOrNull { group ->
+            (0 until group.length).any { i ->
+                val format = group.getTrackFormat(i)
+                val forced = (format.selectionFlags and C.SELECTION_FLAG_FORCED) != 0
+                LanguageCode.matches(format.language, desired.language) &&
+                    forced == desired.isForced
+            }
+        }
+    player.trackSelectionParameters = base
+        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+        .apply {
+            if (group != null) {
+                setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, 0))
+            } else {
+                // The stream the picker saw is not among the player's own
+                // tracks — ask by language rather than force a wrong one
+                setPreferredTextLanguage(desired.language)
+            }
+        }
+        .build()
 }
 
 private fun subtitleMimeType(codec: String?): String? = when (codec?.lowercase()) {

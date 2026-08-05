@@ -21,7 +21,22 @@ enum class SubtitleMode {
     SMART,
 
     /** Always a full track in the preferred language when one exists. */
-    ALWAYS,
+    ALWAYS;
+
+    /** How the mode reads in a settings row, same words on every platform. */
+    val label: String
+        get() = when (this) {
+            OFF -> "Off"
+            FORCED_ONLY -> "Forced only"
+            SMART -> "Smart"
+            ALWAYS -> "Always on"
+        }
+
+    companion object {
+        /** Cycles through the modes — one tap per step, no picker needed. */
+        fun next(current: SubtitleMode): SubtitleMode =
+            entries[(entries.indexOf(current) + 1) % entries.size]
+    }
 }
 
 /**
@@ -81,6 +96,41 @@ object LanguageCode {
             ?.substringBefore('-')
             ?.substringBefore('_')
             ?.takeIf { it.isNotEmpty() && it != "und" && it != "unknown" }
+}
+
+/** One entry of the subtitle-language picker. */
+data class LanguageChoice(val code: String?, val label: String)
+
+/**
+ * The shortlist both platforms offer, in one place so the codes and the
+ * order match. A free-text field would be worse on every screen this app
+ * runs on — a TV remote least of all.
+ *
+ * Codes are ISO 639-2/B, the variant Jellyfin hands back most often;
+ * [LanguageCode] absorbs the difference when a file disagrees.
+ */
+object SubtitleLanguages {
+    /** null follows the device's own language — the right default. */
+    val CHOICES: List<LanguageChoice> = listOf(
+        LanguageChoice(null, "Device language"),
+        LanguageChoice("eng", "English"),
+        LanguageChoice("fre", "French"),
+        LanguageChoice("spa", "Spanish"),
+        LanguageChoice("ger", "German"),
+        LanguageChoice("ita", "Italian"),
+        LanguageChoice("por", "Portuguese"),
+        LanguageChoice("dut", "Dutch"),
+        LanguageChoice("jpn", "Japanese"),
+        LanguageChoice("kor", "Korean"),
+        LanguageChoice("chi", "Chinese"),
+        LanguageChoice("rus", "Russian"),
+        LanguageChoice("ara", "Arabic"),
+    )
+
+    fun labelFor(code: String?): String =
+        CHOICES.firstOrNull { LanguageCode.matches(it.code, code) }?.label
+            ?: code?.uppercase()
+            ?: CHOICES.first().label
 }
 
 /**

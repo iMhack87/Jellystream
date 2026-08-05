@@ -354,6 +354,14 @@ class JellyfinApi(
                 )
             }
 
+        val subtitleStreams = source.mediaStreams.orEmpty().filter { it.isSubtitle }
+        // The audio the server will actually play: its default track, else
+        // the first one. Which language it is decides whether the smart
+        // default puts full subtitles on.
+        val audioStreams = source.mediaStreams.orEmpty().filter { it.isAudio }
+        val audioLanguage = (audioStreams.firstOrNull { it.isDefault } ?: audioStreams.firstOrNull())
+            ?.language
+
         val transcodingUrl = source.transcodingUrl
         return if ((!source.supportsDirectPlay || forceTranscode) && transcodingUrl != null) {
             PlaybackPlan(
@@ -362,6 +370,8 @@ class JellyfinApi(
                 externalSubtitles = subtitles,
                 playSessionId = info.playSessionId,
                 startOffsetSeconds = startTicks / TICKS_PER_SECOND.toDouble(),
+                subtitleStreams = subtitleStreams,
+                audioLanguage = audioLanguage,
             )
         } else {
             val mediaSourceParam = source.id?.let { "&mediaSourceId=$it" } ?: ""
@@ -370,6 +380,8 @@ class JellyfinApi(
                 isTranscode = false,
                 externalSubtitles = subtitles,
                 playSessionId = info.playSessionId,
+                subtitleStreams = subtitleStreams,
+                audioLanguage = audioLanguage,
             )
         }
     }

@@ -293,6 +293,16 @@ data class PlaybackPlan(
      * this offset. 0 for Direct Play, where the clock is absolute.
      */
     val startOffsetSeconds: Double = 0.0,
+
+    /**
+     * Every subtitle stream of the chosen source, embedded ones included —
+     * [externalSubtitles] only covers the files the player must side-load.
+     * The picker needs the whole list to choose a default.
+     */
+    val subtitleStreams: List<MediaStream> = emptyList(),
+
+    /** Language of the audio that will play, which decides the default. */
+    val audioLanguage: String? = null,
 )
 
 @Serializable
