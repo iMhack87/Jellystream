@@ -36,6 +36,9 @@ object CinemaColors {
     val TextSecondary = Color(0xFF9E9EA7)
     val Accent = Color(0xFFF5F5F7)
     val ProgressTrack = Color(0x66FFFFFF)
+
+    /** One look for "this account" — picker, settings header, home button. */
+    val AvatarGradient = listOf(Color(0xFF3A3A44), SurfaceVariant)
 }
 
 private val colorScheme = darkColorScheme(
@@ -97,10 +100,20 @@ fun Modifier.tvDefaultFocus(): Modifier = composed {
     }
 }
 
-fun Modifier.dpadFocusEffect(shape: Shape = RoundedCornerShape(12.dp)): Modifier = composed {
+/**
+ * D-pad focus treatment: white outline, and a slight lift for cards.
+ *
+ * [scaleOnFocus] must be false for anything already spanning the screen —
+ * a full-bleed settings row grown by 8% runs off both edges and clips its
+ * own label.
+ */
+fun Modifier.dpadFocusEffect(
+    shape: Shape = RoundedCornerShape(12.dp),
+    scaleOnFocus: Boolean = true,
+): Modifier = composed {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
-        targetValue = if (focused) 1.08f else 1f,
+        targetValue = if (focused && scaleOnFocus) 1.08f else 1f,
         label = "dpadFocusScale",
     )
     this

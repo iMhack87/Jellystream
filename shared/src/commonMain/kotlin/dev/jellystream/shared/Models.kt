@@ -43,6 +43,19 @@ data class UserSession(
     /** Stable identity of a profile: one account on one server. */
     val profileKey: String
         get() = "$baseUrl|$userId"
+
+    /** How the account is named on screen. */
+    val displayName: String
+        get() = userName ?: "User"
+
+    /** How the server is named on screen — its name, else its bare host. */
+    val serverLabel: String
+        get() = serverName
+            ?: baseUrl.removePrefix("https://").removePrefix("http://")
+
+    /** Single uppercase letter for the avatar circle. */
+    val initial: String
+        get() = (displayName.firstOrNull() ?: 'U').uppercaseChar().toString()
 }
 
 /**
@@ -62,17 +75,18 @@ data class PersistedSession(
     val profileKey: String
         get() = session.profileKey
 
+    // Naming lives on UserSession so screens holding only a live session
+    // (home, settings) label the account exactly like the profile picker
     /** What the profile picker shows. */
     val displayName: String
-        get() = session.userName ?: "User"
+        get() = session.displayName
 
     val serverLabel: String
-        get() = session.serverName
-            ?: session.baseUrl.removePrefix("https://").removePrefix("http://")
+        get() = session.serverLabel
 
     /** Single uppercase letter for the avatar circle. */
     val initial: String
-        get() = (displayName.firstOrNull() ?: 'U').uppercaseChar().toString()
+        get() = session.initial
 
     companion object {
         fun fromJson(json: String): PersistedSession? =

@@ -62,7 +62,9 @@ final class PlayerModel: ObservableObject {
         }
     }
 
-    func attach(to layer: CAMetalLayer) {
+    /// [forceTranscode] comes from the profile's settings: the escape hatch
+    /// for a source mpv mishandles, at the cost of a server-side re-encode.
+    func attach(to layer: CAMetalLayer, forceTranscode: Bool) {
         guard mpv == nil, let handle = mpv_create() else { return }
         mpv = handle
 
@@ -91,7 +93,10 @@ final class PlayerModel: ObservableObject {
         // subtitles), then hand the result to mpv
         Task { [weak self] in
             guard let self else { return }
-            let plan = try? await self.api.getPlaybackPlan(item: self.item, forceTranscode: false)
+            let plan = try? await self.api.getPlaybackPlan(
+                item: self.item,
+                forceTranscode: forceTranscode
+            )
             guard self.mpv != nil else { return } // closed while negotiating
             let url = plan?.url ?? self.api.streamUrl(item: self.item)
             guard let url else {
@@ -263,11 +268,14 @@ final class PlayerModel: ObservableObject {
 
 struct MPVPlayerView: UIViewRepresentable {
     @ObservedObject var model: PlayerModel
+    /// Read from the environment by PlayerScreen and passed down, so the
+    /// value is already resolved when SwiftUI calls makeUIView.
+    let forceTranscode: Bool
 
     func makeUIView(context: Context) -> MetalHostView {
         let view = MetalHostView()
         view.backgroundColor = .black
-        model.attach(to: view.metalLayer)
+        model.attach(to: view.metalLayer, forceTranscode: forceTranscode)
         return view
     }
 
@@ -282,6 +290,7 @@ struct MPVPlayerView: UIViewRepresentable {
 struct PlayerScreen: View {
     @StateObject private var model: PlayerModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.appSettings) private var appSettings
     #if os(tvOS)
     @State private var showTracks = false
     @FocusState private var skipFocused: Bool
@@ -293,7 +302,7 @@ struct PlayerScreen: View {
 
     var body: some View {
         ZStack {
-            MPVPlayerView(model: model)
+            MPVPlayerView(model: model, forceTranscode: appSettings.alwaysTranscode)
                 .ignoresSafeArea()
 
             #if !os(tvOS)

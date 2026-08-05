@@ -34,8 +34,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ExitToApp
-import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
@@ -51,6 +49,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
@@ -71,6 +70,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import dev.jellystream.shared.AppSettings
 import dev.jellystream.shared.BaseItem
 import dev.jellystream.shared.JellyfinApi
 import dev.jellystream.shared.PersistedProfiles
@@ -103,6 +103,7 @@ private sealed interface Screen {
     data class Detail(val item: BaseItem) : Screen
     data class Series(val item: BaseItem) : Screen
     data object Search : Screen
+    data object Settings : Screen
 }
 
 /** App-private storage for the profiles blob (shared module owns the format). */
@@ -135,7 +136,10 @@ private class SessionStore(context: Context) {
 private fun JellystreamApp() {
     val context = LocalContext.current
     val store = remember { SessionStore(context) }
+    val settingsStore = remember { SettingsStore(context) }
     var profiles by remember { mutableStateOf(store.loadProfiles()) }
+    // Every profile's preferences, including the inactive ones
+    var storedSettings by remember { mutableStateOf(settingsStore.load()) }
     // A single known account enters directly (pre-profiles behavior);
     // several → "who's watching" picker. After logout, active goes null
     // and the picker (or login) takes over.
@@ -149,9 +153,20 @@ private fun JellystreamApp() {
             key(current.profileKey) {
                 SignedInApp(
                     profile = current,
+                    settings = storedSettings.forProfile(current.profileKey),
+                    onSettingsChange = {
+                        storedSettings = storedSettings
+                            .withSettings(current.profileKey, it)
+                            .also(settingsStore::save)
+                    },
                     onLoggedOut = {
                         profiles = profiles.withoutProfile(current)
                             .also(store::saveProfiles)
+                        // Nothing should outlive an account the install no
+                        // longer knows
+                        storedSettings = storedSettings
+                            .withoutProfile(current.profileKey)
+                            .also(settingsStore::save)
                         addingProfile = false
                         active = null
                     },
@@ -196,6 +211,8 @@ private fun JellystreamApp() {
 @Composable
 private fun SignedInApp(
     profile: PersistedSession,
+    settings: AppSettings,
+    onSettingsChange: (AppSettings) -> Unit,
     onLoggedOut: () -> Unit,
     onSwitchProfile: () -> Unit,
 ) {
@@ -228,44 +245,57 @@ private fun SignedInApp(
         if (backStack.size > 1) backStack.removeAt(backStack.lastIndex)
     }
 
+    fun logout() {
+        // Best-effort server revocation; local state clears now
+        scope.launch { runCatching { api.logout() } }
+        onLoggedOut()
+    }
+
     // The player is an overlay: the navigation stack stays composed
     // underneath so its state survives closing the player
-    Box {
-        when (val screen = backStack.last()) {
-            Screen.Home -> HomeScreen(
-                api = api,
-                session = profile.session,
-                onOpen = ::open,
-                onPlay = { playing = it },
-                onSearch = { backStack.add(Screen.Search) },
-                onSwitchProfile = onSwitchProfile,
-                onLogout = {
-                    // Best-effort server revocation; local state clears now
-                    scope.launch { runCatching { api.logout() } }
-                    onLoggedOut()
-                },
-            )
-            is Screen.Detail -> DetailScreen(
-                api,
-                screen.item,
-                onPlay = { playing = it },
-                onBack = ::goBack,
-            )
-            is Screen.Series -> SeriesScreen(
-                api,
-                screen.item,
-                onPlay = { playing = it },
-                onBack = ::goBack,
-            )
-            Screen.Search -> SearchScreen(api, onOpen = ::open, onBack = ::goBack)
-        }
+    CompositionLocalProvider(LocalAppSettings provides settings) {
+        Box {
+            when (val screen = backStack.last()) {
+                Screen.Home -> HomeScreen(
+                    api = api,
+                    session = profile.session,
+                    onOpen = ::open,
+                    onPlay = { playing = it },
+                    onSearch = { backStack.add(Screen.Search) },
+                    onSettings = { backStack.add(Screen.Settings) },
+                    onLogout = ::logout,
+                )
+                is Screen.Detail -> DetailScreen(
+                    api,
+                    screen.item,
+                    onPlay = { playing = it },
+                    onBack = ::goBack,
+                )
+                is Screen.Series -> SeriesScreen(
+                    api,
+                    screen.item,
+                    onPlay = { playing = it },
+                    onBack = ::goBack,
+                )
+                Screen.Search -> SearchScreen(api, onOpen = ::open, onBack = ::goBack)
+                Screen.Settings -> SettingsScreen(
+                    api = api,
+                    session = profile.session,
+                    settings = settings,
+                    onChange = onSettingsChange,
+                    onSwitchProfile = onSwitchProfile,
+                    onLogout = ::logout,
+                    onBack = ::goBack,
+                )
+            }
 
-        BackHandler(enabled = backStack.size > 1 && playing == null) {
-            backStack.removeAt(backStack.lastIndex)
-        }
+            BackHandler(enabled = backStack.size > 1 && playing == null) {
+                backStack.removeAt(backStack.lastIndex)
+            }
 
-        playing?.let { item ->
-            PlayerScreen(api, item, onClose = { playing = null })
+            playing?.let { item ->
+                PlayerScreen(api, item, onClose = { playing = null })
+            }
         }
     }
 }
@@ -332,9 +362,7 @@ private fun ProfileAvatar(
                 .then(
                     if (initial != null) {
                         Modifier.background(
-                            Brush.linearGradient(
-                                listOf(Color(0xFF3A3A44), CinemaColors.SurfaceVariant)
-                            )
+                            Brush.linearGradient(CinemaColors.AvatarGradient)
                         )
                     } else {
                         Modifier.border(2.dp, Color.White.copy(alpha = 0.4f), CircleShape)
@@ -588,7 +616,7 @@ private fun HomeScreen(
     onOpen: (BaseItem) -> Unit,
     onPlay: (BaseItem) -> Unit,
     onSearch: () -> Unit,
-    onSwitchProfile: () -> Unit,
+    onSettings: () -> Unit,
     onLogout: () -> Unit,
 ) {
     var sections by remember { mutableStateOf<List<LibrarySection>?>(null) }
@@ -642,30 +670,80 @@ private fun HomeScreen(
             val hero = sections!!.asSequence()
                 .flatMap { it.items }
                 .firstOrNull { it.isPlayable || it.isSeries }
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 32.dp),
-                verticalArrangement = Arrangement.spacedBy(28.dp),
-            ) {
-                item(key = "hero") {
-                    HeroSection(
-                        api = api,
-                        item = hero,
-                        onOpen = onOpen,
-                        onPlay = onPlay,
-                        onSearch = onSearch,
-                        onSwitchProfile = onSwitchProfile,
-                        onLogout = onLogout,
-                    )
-                }
-                items(sections!!, key = { it.key }) { section ->
-                    if (section.key == "resume" || section.key == "nextup") {
-                        ContinueRow(api, section, onOpen)
-                    } else {
-                        LibraryRow(api, section, onOpen)
+            Box(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 32.dp),
+                    verticalArrangement = Arrangement.spacedBy(28.dp),
+                ) {
+                    item(key = "hero") {
+                        HeroSection(
+                            api = api,
+                            item = hero,
+                            onOpen = onOpen,
+                            onPlay = onPlay,
+                        )
+                    }
+                    items(sections!!, key = { it.key }) { section ->
+                        if (section.key == "resume" || section.key == "nextup") {
+                            ContinueRow(api, section, onOpen)
+                        } else {
+                            LibraryRow(api, section, onOpen)
+                        }
                     }
                 }
+                // Sibling of the list, not a hero child: inside the hero's
+                // LazyColumn item these controls stayed unpainted until the
+                // D-pad reached them (verified on the Android TV emulator).
+                // It is also where a top bar belongs — it must not scroll away.
+                AccountBar(
+                    session = session,
+                    onSearch = onSearch,
+                    onSettings = onSettings,
+                    modifier = Modifier.align(Alignment.TopEnd),
+                )
             }
+        }
+    }
+}
+
+/**
+ * Search + profile, pinned top-right over the artwork. Switching profile
+ * and signing out live one step deeper, in Settings — a logout icon one
+ * D-pad press from the hero is a TV footgun.
+ */
+@Composable
+private fun AccountBar(
+    session: UserSession,
+    onSearch: () -> Unit,
+    onSettings: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .statusBarsPadding()
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+            // Scrim pill: white glyphs on a bright backdrop are otherwise
+            // invisible, and this is the only way into settings
+            .background(Color.Black.copy(alpha = 0.35f), CircleShape)
+            .padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        IconButton(
+            onClick = onSearch,
+            modifier = Modifier.dpadFocusEffect(CircleShape),
+        ) {
+            Icon(Icons.Default.Search, contentDescription = "Search", tint = Color.White)
+        }
+        Box(
+            modifier = Modifier
+                .dpadFocusEffect(CircleShape)
+                .clip(CircleShape)
+                .clickable { onSettings() }
+                .padding(6.dp),
+        ) {
+            AvatarCircle(initial = session.initial, size = 32.dp)
         }
     }
 }
@@ -677,9 +755,6 @@ private fun HeroSection(
     item: BaseItem?,
     onOpen: (BaseItem) -> Unit,
     onPlay: (BaseItem) -> Unit,
-    onSearch: () -> Unit,
-    onSwitchProfile: () -> Unit,
-    onLogout: () -> Unit,
 ) {
     Box(
         modifier = Modifier
@@ -708,33 +783,6 @@ private fun HeroSection(
                     )
                 ),
         )
-
-        Row(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .statusBarsPadding()
-                .padding(horizontal = 8.dp),
-        ) {
-            IconButton(onClick = onSearch) {
-                Icon(Icons.Default.Search, contentDescription = "Search", tint = Color.White)
-            }
-            // Back to "who's watching" — also the only path from a
-            // single-profile install to adding a second account
-            IconButton(onClick = onSwitchProfile) {
-                Icon(
-                    Icons.Default.AccountCircle,
-                    contentDescription = "Switch profile",
-                    tint = Color.White,
-                )
-            }
-            IconButton(onClick = onLogout) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ExitToApp,
-                    contentDescription = "Log out",
-                    tint = Color.White,
-                )
-            }
-        }
 
         if (item != null) {
             Column(

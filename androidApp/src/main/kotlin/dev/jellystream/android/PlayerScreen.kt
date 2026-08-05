@@ -73,7 +73,10 @@ private val playbackReportScope = CoroutineScope(SupervisorJob() + Dispatchers.I
 @Composable
 fun PlayerScreen(api: JellyfinApi, item: BaseItem, onClose: () -> Unit) {
     var plan by remember { mutableStateOf<PlaybackPlan?>(null) }
-    var forceTranscode by remember { mutableStateOf(false) }
+    // Seeded from the profile's settings; the Direct Play failure path can
+    // still flip it on for this item alone
+    val alwaysTranscode = LocalAppSettings.current.alwaysTranscode
+    var forceTranscode by remember { mutableStateOf(alwaysTranscode) }
     var failed by remember { mutableStateOf(false) }
     var segments by remember { mutableStateOf<List<MediaSegment>>(emptyList()) }
 
