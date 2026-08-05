@@ -102,23 +102,17 @@ struct SeriesView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 14) {
                 ForEach(seasons, id: \.id) { season in
-                    let selected = season.id == selectedSeason?.id
                     #if os(tvOS)
                     // Untouched system buttons so tvOS 26's Liquid Glass
                     // (and the Focus Engine's color management) stay
                     // intact — any custom background or label color
-                    // fights them. Selection reads as a checkmark, the
-                    // system idiom for pills that keep their glass look.
+                    // fights them. The shelf below already says which
+                    // season is open; no extra selection marker needed.
                     Button {
                         selectedSeason = season
                     } label: {
-                        HStack(spacing: 8) {
-                            if selected {
-                                Image(systemName: "checkmark")
-                            }
-                            Text(season.name ?? "Season")
-                        }
-                        .font(.headline)
+                        Text(season.name ?? "Season")
+                            .font(.headline)
                     }
                     #else
                     Button {
@@ -126,7 +120,9 @@ struct SeriesView: View {
                     } label: {
                         Text(season.name ?? "Season")
                     }
-                    .buttonStyle(SeasonPillStyle(selected: selected))
+                    .buttonStyle(
+                        SeasonPillStyle(selected: season.id == selectedSeason?.id)
+                    )
                     #endif
                 }
             }
@@ -214,6 +210,9 @@ private struct EpisodeStill: View {
         ZStack(alignment: .bottomLeading) {
             AsyncImage(url: api.imageUrl(item: episode, maxWidth: 800).flatMap { URL(string: $0) }) { image in
                 image.resizable().scaledToFill()
+                    // Anti-spoiler: the still stays blurred until the
+                    // episode has been started or watched
+                    .blur(radius: episode.shouldBlurPreview ? 14 : 0)
             } placeholder: {
                 Rectangle().fill(Color(white: 0.12))
             }
@@ -239,6 +238,14 @@ private struct EpisodeStill: View {
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(.black.opacity(0.55), in: Capsule())
+                    .padding(10)
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if episode.isWatched {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.white, .black.opacity(0.6))
                     .padding(10)
             }
         }

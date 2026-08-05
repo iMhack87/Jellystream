@@ -27,6 +27,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -44,6 +45,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -341,8 +343,25 @@ private fun EpisodeCard(api: JellyfinApi, episode: BaseItem, onPlay: (BaseItem) 
                 model = api.imageUrl(episode, 600),
                 contentDescription = episode.name,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    // Anti-spoiler: the still stays blurred until the
+                    // episode has been started or watched
+                    .then(if (episode.shouldBlurPreview) Modifier.blur(14.dp) else Modifier),
             )
+            if (episode.isWatched) {
+                Icon(
+                    Icons.Default.CheckCircle,
+                    contentDescription = "Watched",
+                    tint = Color.White,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(10.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.6f))
+                        .padding(2.dp),
+                )
+            }
             episode.playedFraction?.let { fraction ->
                 Box(
                     modifier = Modifier
