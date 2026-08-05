@@ -152,6 +152,8 @@ data class BaseItem(
     @SerialName("RunTimeTicks") val runTimeTicks: Long? = null,
     @SerialName("Genres") val genres: List<String>? = null,
     @SerialName("CommunityRating") val communityRating: Double? = null,
+    @SerialName("CriticRating") val criticRating: Int? = null,
+    @SerialName("OfficialRating") val officialRating: String? = null,
     @SerialName("IndexNumber") val indexNumber: Int? = null,
     @SerialName("ParentIndexNumber") val parentIndexNumber: Int? = null,
     @SerialName("BackdropImageTags") val backdropImageTags: List<String>? = null,
@@ -162,6 +164,14 @@ data class BaseItem(
     /** "yyyy-MM-dd" air date, null when the server didn't send one. */
     val premiereDateIso: String?
         get() = premiereDate?.takeIf { it.length >= 10 }?.take(10)
+
+    /** Audience score, tomatometer and age certificate, ready to display. */
+    val ratings: ItemRatings
+        get() = ItemRatings(
+            communityScore = communityRating,
+            criticScore = criticRating,
+            officialRating = officialRating,
+        )
 
     /** Direct playback targets — the single source of truth for both platforms. */
     val isPlayable: Boolean

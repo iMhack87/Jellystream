@@ -39,6 +39,13 @@ object CinemaColors {
 
     /** One look for "this account" — picker, settings header, home button. */
     val AvatarGradient = listOf(Color(0xFF3A3A44), SurfaceVariant)
+
+    /** Audience star. */
+    val RatingStar = Color(0xFFF5C518)
+
+    /** Tomatometer: above the 60% line, and below it. */
+    val CriticFresh = Color(0xFF54D06C)
+    val CriticRotten = Color(0xFFFF8A4C)
 }
 
 private val colorScheme = darkColorScheme(

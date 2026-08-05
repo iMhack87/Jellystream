@@ -16,10 +16,10 @@ Jellystream aims to play **every format your Jellyfin server can throw at it, na
 
 | Platform | Status |
 |----------|--------|
-| Android | 🚧 In progress — browse, search, series, Direct Play (Media3), resume |
-| Android TV | 🚧 In progress — browse, search, series, Direct Play (Media3), resume |
-| iOS / iPadOS | 🚧 In progress — browse, search, series, Direct Play (mpv), resume |
-| Apple TV (tvOS) | 🚧 In progress — browse, series, Direct Play (mpv), resume |
+| Android | 🚧 In progress — browse, search, series, profiles, settings, Direct Play (Media3), resume |
+| Android TV | 🚧 In progress — same, driven by the D-pad |
+| iOS / iPadOS | 🚧 In progress — browse, search, series, profiles, settings, Direct Play (mpv), resume |
+| Apple TV (tvOS) | 🚧 In progress — same, driven by the Siri Remote |
 
 ## Tech stack
 
@@ -33,7 +33,15 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full rationale.
 
 ## Status
 
-🚧 **Early days.** All four targets build and run: login against any Jellyfin server (https→http fallback for LAN servers), a home screen with **Continue Watching** and **Next Up**, movie/episode detail pages, **series browsing** (seasons and episodes), and **search**. Tap anything playable to **Direct Play the original file** — mpv+FFmpeg on Apple platforms (the all-formats engine), Media3/ExoPlayer on Android (FFmpeg audio decoders coming next) — with pause/seek controls, **audio/subtitle track selection**, cross-device resume, and progress reporting to the server. See [docs/BUILDING.md](docs/BUILDING.md) to build.
+🚧 **Early days**, but all four targets build and run.
+
+**Getting in.** Log in against any Jellyfin server (https→http fallback for LAN servers, with a warning before credentials cross an insecure link) or pair with **Quick Connect** — the sane way to sign in on a TV. Several accounts share one install through a **"Who's watching?" picker**, each with its own device id and its own preferences.
+
+**Browsing.** A home screen with **Continue Watching** and **Next Up**, movie and episode detail pages, **series browsing** (seasons and episodes), and **search**. Detail pages show the **audience score and the Rotten Tomatoes tomatometer**, colored fresh or rotten. Watched episodes are ticked, and unwatched previews stay blurred so a thumbnail never spoils the next episode.
+
+**Playing.** Anything playable **Direct Plays the original file** — mpv+FFmpeg on Apple platforms (the all-formats engine), Media3/ExoPlayer on Android (FFmpeg audio decoders coming next) — with pause/seek controls, **audio and subtitle track selection**, **Skip Intro** driven by the server's media segments, cross-device resume, and progress reporting back to the server. A per-profile **Always transcode** switch is there for the rare file a device cannot decode.
+
+See [docs/BUILDING.md](docs/BUILDING.md) to build.
 
 ## License
 

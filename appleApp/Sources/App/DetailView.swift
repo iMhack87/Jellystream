@@ -54,6 +54,8 @@ struct DetailView: View {
                             .foregroundStyle(.secondary)
                     }
 
+                    RatingsRow(ratings: item.ratings)
+
                     if let genres = item.genres, !genres.isEmpty {
                         Text(genres.joined(separator: " · "))
                             .font(.caption)
@@ -116,9 +118,8 @@ struct DetailView: View {
         var parts: [String] = []
         if let year = item.productionYear { parts.append("\(year)") }
         if let minutes = item.runtimeMinutes { parts.append("\(minutes) min") }
-        if let rating = item.communityRating {
-            parts.append(String(format: "★ %.1f", rating.doubleValue))
-        }
+        // Ratings moved out to RatingsRow — a star, a tomatometer and a
+        // certificate crammed into one grey line read as trivia
         return parts.joined(separator: "  ·  ")
     }
 }

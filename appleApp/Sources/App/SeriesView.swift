@@ -86,14 +86,18 @@ struct SeriesView: View {
             )
             .frame(height: headerHeight)
 
-            Text(series.name ?? "")
-                .font(.system(size: 46, weight: .heavy))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.5)
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, HomeMetrics.edgePadding)
-                .padding(.bottom, 16)
+            VStack(spacing: 8) {
+                Text(series.name ?? "")
+                    .font(.system(size: 46, weight: .heavy))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+
+                RatingsRow(ratings: series.ratings)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, HomeMetrics.edgePadding)
+            .padding(.bottom, 16)
         }
         .frame(height: headerHeight)
     }
