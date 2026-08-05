@@ -54,10 +54,16 @@ final class AppModel: ObservableObject {
     }
 
     /// The server rejected our token: the session is dead and every call
-    /// will 401. Drop the profile and land back on sign-in.
+    /// will 401. Drop the profile and land back on sign-in. The identity
+    /// check ignores late 401s from a previous profile's api instance
+    /// (fire-and-forget playback reports can outlive a profile switch).
     private func wireApi() {
-        api.onUnauthorized = { [weak self] in
-            DispatchQueue.main.async { self?.handleSessionExpired() }
+        let wired = api
+        wired.onUnauthorized = { [weak self, weak wired] in
+            DispatchQueue.main.async {
+                guard let self, let wired, self.api === wired else { return }
+                self.handleSessionExpired()
+            }
         }
     }
 
@@ -89,6 +95,7 @@ final class AppModel: ObservableObject {
     }
 
     func select(profile: PersistedSession) {
+        api.onUnauthorized = nil
         deviceId = profile.deviceId
         api = Self.makeApi(deviceId: profile.deviceId)
         api.restoreSession(restored: profile.session)
@@ -99,6 +106,7 @@ final class AppModel: ObservableObject {
     /// New accounts get a fresh DeviceId — two users sharing one would
     /// revoke each other's tokens server-side.
     func startAddProfile() {
+        api.onUnauthorized = nil
         deviceId = UUID().uuidString
         api = Self.makeApi(deviceId: deviceId)
         wireApi()

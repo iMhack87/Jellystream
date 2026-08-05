@@ -562,12 +562,16 @@ private fun LoginScreen(
                             }
                         }
                     },
+                    modifier = Modifier.dpadFocusEffect(RoundedCornerShape(10.dp)),
                 ) {
                     Text("Connect Anyway")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { insecurePending = null }) {
+                TextButton(
+                    onClick = { insecurePending = null },
+                    modifier = Modifier.dpadFocusEffect(RoundedCornerShape(10.dp)),
+                ) {
                     Text("Cancel")
                 }
             },

@@ -160,10 +160,19 @@ class JellyfinApi(
     }
 
     suspend fun getQuickConnectState(baseUrl: String, secret: String): QuickConnectState =
-        http.get("$baseUrl/QuickConnect/Connect") {
-            url.parameters.append("secret", secret)
-            header("Authorization", authorizationHeader(accessToken = null))
-        }.body()
+        try {
+            http.get("$baseUrl/QuickConnect/Connect") {
+                url.parameters.append("secret", secret)
+                header("Authorization", authorizationHeader(accessToken = null))
+            }.body()
+        } catch (e: ClientRequestException) {
+            // The secret rides in the query string (protocol requirement)
+            // and ktor embeds the full URL in its message — never let it
+            // reach an on-screen error
+            throw IllegalStateException(
+                "Quick Connect failed (HTTP ${e.response.status.value})"
+            )
+        }
 
     /** Exchanges an approved Quick Connect secret for a real session. */
     suspend fun authenticateWithQuickConnect(baseUrl: String, secret: String): UserSession {
