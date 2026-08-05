@@ -1,5 +1,6 @@
 package dev.jellystream.android
 
+import android.content.pm.PackageManager
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -7,13 +8,17 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
@@ -72,6 +77,26 @@ fun JellystreamTheme(content: @Composable () -> Unit) {
  * modifier so focus changes don't recompose the whole item; zIndex lifts
  * the focused card above its later-drawn siblings.
  */
+/**
+ * Grabs initial D-pad focus on TV so the screen's primary CTA is one
+ * center-press away (the ATV+ pattern) — without it, initial focus lands
+ * on whatever the traversal order picks (nav buttons, secondary links)
+ * and Play can even be unreachable from them. Inert on touch devices.
+ */
+fun Modifier.tvDefaultFocus(): Modifier = composed {
+    val context = LocalContext.current
+    val isTv = remember {
+        context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+    }
+    if (isTv) {
+        val requester = remember { FocusRequester() }
+        LaunchedEffect(Unit) { requester.requestFocus() }
+        this.focusRequester(requester)
+    } else {
+        this
+    }
+}
+
 fun Modifier.dpadFocusEffect(shape: Shape = RoundedCornerShape(12.dp)): Modifier = composed {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
