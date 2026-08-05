@@ -157,6 +157,17 @@ data class BaseItem(
     val resumePositionSeconds: Double
         get() = (userData?.playbackPositionTicks ?: 0L) / 10_000_000.0
 
+    /** Fully watched (the server-side Played flag). */
+    val isWatched: Boolean
+        get() = userData?.played == true
+
+    /**
+     * Anti-spoiler rule, decided once for every platform: an episode
+     * still stays blurred until the user has started or finished it.
+     */
+    val shouldBlurPreview: Boolean
+        get() = !isWatched && playedFraction == null
+
     /** Watched fraction 0.0–1.0 for progress bars, null when not started. */
     val playedFraction: Double?
         get() {
