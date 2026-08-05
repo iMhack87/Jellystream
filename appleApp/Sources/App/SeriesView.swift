@@ -102,28 +102,32 @@ struct SeriesView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 14) {
                 ForEach(seasons, id: \.id) { season in
-                    // Self-drawn pill on every platform: the system tvOS
-                    // style tints label and platter together, which erases
-                    // the selected label and hides unfocused pills. With
-                    // .plain the focus lift applies to this capsule itself.
+                    let selected = season.id == selectedSeason?.id
+                    #if os(tvOS)
+                    // Untouched system buttons so tvOS 26's Liquid Glass
+                    // (and the Focus Engine's color management) stay
+                    // intact — any custom background or label color
+                    // fights them. Selection reads as a checkmark, the
+                    // system idiom for pills that keep their glass look.
+                    Button {
+                        selectedSeason = season
+                    } label: {
+                        HStack(spacing: 8) {
+                            if selected {
+                                Image(systemName: "checkmark")
+                            }
+                            Text(season.name ?? "Season")
+                        }
+                        .font(.headline)
+                    }
+                    #else
                     Button {
                         selectedSeason = season
                     } label: {
                         Text(season.name ?? "Season")
-                            .font(.headline)
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 9)
-                            .background(
-                                season.id == selectedSeason?.id
-                                    ? AnyShapeStyle(.white)
-                                    : AnyShapeStyle(.white.opacity(0.15)),
-                                in: Capsule()
-                            )
-                            .foregroundStyle(
-                                season.id == selectedSeason?.id ? .black : .white
-                            )
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(SeasonPillStyle(selected: selected))
+                    #endif
                 }
             }
             .padding(.horizontal, HomeMetrics.edgePadding)
@@ -166,6 +170,30 @@ struct SeriesView: View {
         #if os(tvOS)
         .scrollClipDisabled()
         #endif
+    }
+}
+
+/**
+ * Touch-platform season pill: selected = solid white capsule, black text.
+ * tvOS uses untouched system buttons instead (Liquid Glass + Focus
+ * Engine own the visuals there; selection is a checkmark in the label).
+ */
+private struct SeasonPillStyle: ButtonStyle {
+    let selected: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.headline)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 9)
+            .background(
+                selected
+                    ? AnyShapeStyle(.white)
+                    : AnyShapeStyle(.white.opacity(0.15)),
+                in: Capsule()
+            )
+            .foregroundStyle(selected ? .black : .white)
+            .opacity(configuration.isPressed ? 0.8 : 1.0)
     }
 }
 
