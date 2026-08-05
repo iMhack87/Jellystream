@@ -34,6 +34,49 @@ struct SettingsView: View {
     /// screen. Empty when the call fails: no section beats a broken one.
     @State private var libraries: [BaseItem] = []
 
+    private var subtitleMode: Binding<SubtitleMode> {
+        Binding(
+            get: { settings.subtitleMode },
+            set: { onChange(settings.withSubtitleMode(mode: $0)) }
+        )
+    }
+
+    private var subtitleLanguage: Binding<String?> {
+        Binding(
+            get: {
+                // Snap to the entry the picker actually holds: "fr" from an
+                // older blob must still select the "fre" row
+                SubtitleLanguages.shared.CHOICES
+                    .first { LanguageCode.shared.matches(a: $0.code, b: settings.subtitleLanguage) }?
+                    .code
+            },
+            set: { onChange(settings.withSubtitleLanguage(code: $0)) }
+        )
+    }
+
+    private var subtitleScale: Binding<Double> {
+        Binding(
+            get: { Self.scales.min { abs($0 - settings.subtitleScale) < abs($1 - settings.subtitleScale) } ?? 1.0 },
+            set: { onChange(settings.withSubtitleScale(value: $0)) }
+        )
+    }
+
+    /// The sizes worth offering; anything finer is fiddling, not a setting.
+    private static let scales: [Double] = [0.75, 1.0, 1.25, 1.5, 2.0]
+
+    private static func scaleLabel(_ scale: Double) -> String {
+        abs(scale - 1.0) < 0.01 ? "Normal" : "\(Int(scale * 100))%"
+    }
+
+    /// The system language, named as the picker would name it.
+    private static var deviceLanguageLabel: String {
+        let code = Locale.current.language.languageCode?.identifier(.alpha3)
+        let label = SubtitleLanguages.shared.labelFor(code: code)
+        return label == SubtitleLanguages.shared.CHOICES.first?.label
+            ? (code?.uppercased() ?? "unknown")
+            : label
+    }
+
     private func showsLibrary(_ view: BaseItem) -> Binding<Bool> {
         Binding(
             get: { settings.showsLibrary(view: view) },
@@ -83,6 +126,32 @@ struct SettingsView: View {
                 } header: {
                     Text("Home Screen")
                 }
+            }
+
+            Section {
+                Picker("When to show", selection: subtitleMode) {
+                    ForEach(SubtitleMode.entries, id: \.self) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                Picker("Language", selection: subtitleLanguage) {
+                    ForEach(SubtitleLanguages.shared.CHOICES, id: \.label) { choice in
+                        Text(choice.label).tag(choice.code)
+                    }
+                }
+                Picker("Size", selection: subtitleScale) {
+                    ForEach(Self.scales, id: \.self) { scale in
+                        Text(Self.scaleLabel(scale)).tag(scale)
+                    }
+                }
+            } header: {
+                Text("Subtitles")
+            } footer: {
+                Text(
+                    "Smart turns on full subtitles when the audio is not in your "
+                    + "language, and only forced ones when it is. Device language "
+                    + "follows the system: \(Self.deviceLanguageLabel)."
+                )
             }
 
             Section {
