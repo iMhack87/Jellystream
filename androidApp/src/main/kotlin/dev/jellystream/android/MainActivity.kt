@@ -11,6 +11,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -62,6 +63,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -670,9 +674,17 @@ private fun HomeScreen(
             val hero = sections!!.asSequence()
                 .flatMap { it.items }
                 .firstOrNull { it.isPlayable || it.isSeries }
+            // The way back down for the remote: the account bar overlays the
+            // list instead of living in it, and the focus engine finds no
+            // geometric path out of an overlay — Down from the avatar left
+            // the user stuck up there. Named target, no guessing.
+            val listFocus = remember { FocusRequester() }
             Box(modifier = Modifier.fillMaxSize()) {
                 LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .focusGroup()
+                        .focusRequester(listFocus),
                     contentPadding = PaddingValues(bottom = 32.dp),
                     verticalArrangement = Arrangement.spacedBy(28.dp),
                 ) {
@@ -700,7 +712,9 @@ private fun HomeScreen(
                     session = session,
                     onSearch = onSearch,
                     onSettings = onSettings,
-                    modifier = Modifier.align(Alignment.TopEnd),
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .focusProperties { down = listFocus },
                 )
             }
         }

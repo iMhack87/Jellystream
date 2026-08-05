@@ -1,6 +1,7 @@
 package dev.jellystream.android
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,6 +30,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -54,9 +56,72 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import dev.jellystream.shared.BaseItem
+import dev.jellystream.shared.ItemRatings
 import dev.jellystream.shared.JellyfinApi
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+
+/**
+ * Audience score, tomatometer and age certificate, in that order.
+ *
+ * Deliberately not the Rotten Tomatoes marks: the percentage carries the
+ * verdict on its own, colored at the 60% line, and shipping their artwork
+ * is not ours to do. Renders nothing at all when the server has no rating,
+ * rather than leaving an empty strip on the page.
+ */
+@Composable
+fun RatingsRow(ratings: ItemRatings, modifier: Modifier = Modifier) {
+    if (ratings.isEmpty) return
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        ratings.communityLabel?.let { score ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Icon(
+                    Icons.Default.Star,
+                    contentDescription = "Audience rating",
+                    tint = CinemaColors.RatingStar,
+                    modifier = Modifier.size(16.dp),
+                )
+                Text(
+                    score,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = CinemaColors.TextPrimary,
+                )
+            }
+        }
+        ratings.criticLabel?.let { percent ->
+            Text(
+                percent,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (ratings.criticIsFresh == true) {
+                    CinemaColors.CriticFresh
+                } else {
+                    CinemaColors.CriticRotten
+                },
+            )
+        }
+        ratings.officialLabel?.let { certificate ->
+            Text(
+                certificate,
+                style = MaterialTheme.typography.labelMedium,
+                color = CinemaColors.TextSecondary,
+                modifier = Modifier
+                    .border(
+                        1.dp,
+                        CinemaColors.TextSecondary.copy(alpha = 0.6f),
+                        RoundedCornerShape(4.dp),
+                    )
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+        }
+    }
+}
 
 /**
  * Floating circular back/close control — iOS-style, visible affordance on
@@ -148,7 +213,6 @@ fun DetailScreen(
             val meta = buildList {
                 full.productionYear?.let { add(it.toString()) }
                 full.runtimeMinutes?.let { add("$it min") }
-                full.communityRating?.let { add("★ %.1f".format(it)) }
             }.joinToString("  ·  ")
             if (meta.isNotEmpty()) {
                 Text(
@@ -157,6 +221,8 @@ fun DetailScreen(
                     color = CinemaColors.TextSecondary,
                 )
             }
+
+            RatingsRow(full.ratings)
 
             full.genres?.takeIf { it.isNotEmpty() }?.let {
                 Text(
@@ -273,6 +339,12 @@ fun SeriesScreen(
                     onClick = onBack,
                     modifier = Modifier.align(Alignment.TopStart),
                 )
+            }
+        }
+        item(key = "ratings") {
+            // Centered under the title, like the header it belongs to
+            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                RatingsRow(series.ratings)
             }
         }
         error?.let {
