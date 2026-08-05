@@ -3,6 +3,8 @@ package dev.jellystream.android
 import android.content.Context
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -37,6 +39,7 @@ import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -46,7 +49,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
@@ -203,6 +208,14 @@ private fun SignedInApp(
     var playing by remember { mutableStateOf<BaseItem?>(null) }
     val backStack = remember { mutableStateListOf<Screen>(Screen.Home) }
     val scope = rememberCoroutineScope()
+
+    // The server rejected our token: the session is dead and every call
+    // will 401. Route back to sign-in (the callback may fire off-main).
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
+    DisposableEffect(api) {
+        api.onUnauthorized = { mainHandler.post(onLoggedOut) }
+        onDispose { api.onUnauthorized = null }
+    }
 
     fun open(item: BaseItem) {
         when {
@@ -376,6 +389,62 @@ private fun LoginScreen(
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var quickConnectCode by remember { mutableStateOf<String?>(null) }
+    // Resolved-to-http URL waiting for the user's go-ahead (true = QC path)
+    var insecurePending by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+
+    suspend fun doPasswordLogin(baseUrl: String) {
+        onLoggedIn(api.login(baseUrl, username, password))
+    }
+
+    suspend fun doQuickConnect(resolvedUrl: String) {
+        quickConnectCode = null
+        try {
+            val (baseUrl, initial) = api.initiateQuickConnect(resolvedUrl)
+            quickConnectCode = initial.code
+            var state = initial
+            // Jellyfin codes expire (~5 min); stop polling rather than
+            // hanging forever on a dead code
+            val deadline = System.currentTimeMillis() + 5 * 60_000
+            while (!state.authenticated) {
+                if (System.currentTimeMillis() > deadline) {
+                    error = "Quick Connect code expired — try again"
+                    return
+                }
+                delay(3_000)
+                state = api.getQuickConnectState(baseUrl, initial.secret)
+            }
+            onLoggedIn(api.authenticateWithQuickConnect(baseUrl, initial.secret))
+        } finally {
+            quickConnectCode = null
+        }
+    }
+
+    /**
+     * Resolves BEFORE sending anything sensitive: a scheme-less input that
+     * only answers over plain http needs the user's explicit go-ahead.
+     */
+    fun connect(quickConnect: Boolean) {
+        scope.launch {
+            loading = true
+            error = null
+            try {
+                val server = api.resolveServer(serverUrl)
+                if (JellyfinApi.isInsecureDowngrade(serverUrl, server.baseUrl)) {
+                    insecurePending = server.baseUrl to quickConnect
+                } else if (quickConnect) {
+                    doQuickConnect(server.baseUrl)
+                } else {
+                    doPasswordLogin(server.baseUrl)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                error = e.message ?: "Connection failed"
+            } finally {
+                loading = false
+            }
+        }
+    }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
@@ -410,19 +479,7 @@ private fun LoginScreen(
 
         Button(
             enabled = !loading && serverUrl.isNotBlank(),
-            onClick = {
-                scope.launch {
-                    loading = true
-                    error = null
-                    try {
-                        onLoggedIn(api.login(serverUrl, username, password))
-                    } catch (e: Exception) {
-                        error = e.message ?: "Connection failed"
-                    } finally {
-                        loading = false
-                    }
-                }
-            },
+            onClick = { connect(quickConnect = false) },
             modifier = Modifier.dpadFocusEffect(RoundedCornerShape(10.dp)),
         ) {
             Text("Connect")
@@ -436,37 +493,7 @@ private fun LoginScreen(
                 .dpadFocusEffect(RoundedCornerShape(10.dp))
                 .clip(RoundedCornerShape(10.dp))
                 .clickable(enabled = !loading && serverUrl.isNotBlank()) {
-                    scope.launch {
-                        loading = true
-                        error = null
-                        quickConnectCode = null
-                        try {
-                            val (baseUrl, initial) = api.initiateQuickConnect(serverUrl)
-                            quickConnectCode = initial.code
-                            var state = initial
-                            // Jellyfin codes expire (~5 min); stop polling
-                            // rather than hanging forever on a dead code
-                            val deadline = System.currentTimeMillis() + 5 * 60_000
-                            while (!state.authenticated) {
-                                if (System.currentTimeMillis() > deadline) {
-                                    error = "Quick Connect code expired — try again"
-                                    return@launch
-                                }
-                                delay(3_000)
-                                state = api.getQuickConnectState(baseUrl, initial.secret)
-                            }
-                            onLoggedIn(
-                                api.authenticateWithQuickConnect(baseUrl, initial.secret)
-                            )
-                        } catch (e: CancellationException) {
-                            throw e
-                        } catch (e: Exception) {
-                            error = e.message ?: "Quick Connect failed"
-                        } finally {
-                            loading = false
-                            quickConnectCode = null
-                        }
-                    }
+                    connect(quickConnect = true)
                 }
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         )
@@ -496,6 +523,55 @@ private fun LoginScreen(
                 modifier = Modifier.align(Alignment.TopStart),
             )
         }
+    }
+
+    // Shown BEFORE any credential leaves the device: the server only
+    // answered over plain http for a scheme-less input
+    insecurePending?.let { (resolvedUrl, quickConnect) ->
+        AlertDialog(
+            onDismissRequest = { insecurePending = null },
+            title = { Text("Unencrypted connection") },
+            text = {
+                Text(
+                    "This server is only reachable over plain HTTP. Your " +
+                        "password and streams would travel unencrypted on " +
+                        "the network."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        insecurePending = null
+                        scope.launch {
+                            loading = true
+                            error = null
+                            try {
+                                // Explicit http URL: single candidate, no
+                                // second downgrade prompt
+                                if (quickConnect) {
+                                    doQuickConnect(resolvedUrl)
+                                } else {
+                                    doPasswordLogin(resolvedUrl)
+                                }
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                error = e.message ?: "Connection failed"
+                            } finally {
+                                loading = false
+                            }
+                        }
+                    },
+                ) {
+                    Text("Connect Anyway")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { insecurePending = null }) {
+                    Text("Cancel")
+                }
+            },
+        )
     }
 }
 

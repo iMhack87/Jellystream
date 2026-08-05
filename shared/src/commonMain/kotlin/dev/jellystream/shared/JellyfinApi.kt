@@ -2,12 +2,15 @@ package dev.jellystream.shared
 
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
+import io.ktor.client.plugins.ClientRequestException
+import io.ktor.client.plugins.HttpResponseValidator
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
+import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.CancellationException
@@ -32,7 +35,30 @@ class JellyfinApi(
         install(ContentNegotiation) {
             json(Json { ignoreUnknownKeys = true })
         }
+        // Non-2xx must throw so a revoked token surfaces as a 401 instead
+        // of a JSON parse error on the error page
+        expectSuccess = true
+        HttpResponseValidator {
+            handleResponseExceptionWithRequest { exception, _ ->
+                if (exception is ClientRequestException &&
+                    exception.response.status == HttpStatusCode.Unauthorized &&
+                    session != null
+                ) {
+                    // Only an established session can expire — a wrong
+                    // password during login is a plain failure, not this
+                    onUnauthorized?.invoke()
+                }
+            }
+        }
     }
+
+    /**
+     * Invoked (possibly off the main thread) when the server rejects the
+     * current session's token: it was revoked or expired, and every further
+     * call will fail. Platforms route back to sign-in. The original
+     * exception still propagates to the caller.
+     */
+    var onUnauthorized: (() -> Unit)? = null
 
     private var session: UserSession? = null
 
@@ -495,6 +521,16 @@ class JellyfinApi(
                 "https://$trimmed"
             }
         }
+
+        /**
+         * True when a scheme-less input could only be reached over plain
+         * http — credentials and streams would travel unencrypted, so the
+         * user must confirm BEFORE anything sensitive is sent. Explicit
+         * "http://" input is the user's own choice and doesn't trip this.
+         */
+        fun isInsecureDowngrade(rawInput: String, resolvedBaseUrl: String): Boolean =
+            !rawInput.trim().startsWith("http://") &&
+                resolvedBaseUrl.startsWith("http://")
 
         /** Ordered connection attempts for what the user typed. */
         fun candidateUrls(raw: String): List<String> {

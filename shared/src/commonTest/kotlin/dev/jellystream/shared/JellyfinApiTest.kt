@@ -187,6 +187,29 @@ class JellyfinApiTest {
     }
 
     @Test
+    fun isInsecureDowngrade_flagsSchemelessHttpFallbackOnly() {
+        // Scheme-less input that fell back to http → warn before sending credentials
+        assertEquals(
+            true,
+            JellyfinApi.isInsecureDowngrade("192.168.1.10:8096", "http://192.168.1.10:8096"),
+        )
+        // Explicit http is the user's own choice
+        assertEquals(
+            false,
+            JellyfinApi.isInsecureDowngrade("http://192.168.1.10:8096", "http://192.168.1.10:8096"),
+        )
+        // https resolutions are never a downgrade
+        assertEquals(
+            false,
+            JellyfinApi.isInsecureDowngrade("jf.example.com", "https://jf.example.com"),
+        )
+        assertEquals(
+            false,
+            JellyfinApi.isInsecureDowngrade(" 192.168.1.10:8096 ", "https://192.168.1.10:8096"),
+        )
+    }
+
+    @Test
     fun isPlayable_moviesAndEpisodesOnly() {
         assertEquals(true, BaseItem(id = "a", type = "Movie").isPlayable)
         assertEquals(true, BaseItem(id = "b", type = "Episode").isPlayable)

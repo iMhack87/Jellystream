@@ -12,9 +12,19 @@ final class AppModel: ObservableObject {
         case failure(String)
     }
 
+    /** A connection resolved to plain http, awaiting the user's go-ahead. */
+    struct PendingInsecureConnection {
+        let baseUrl: String
+        let username: String
+        let password: String
+        let quickConnect: Bool
+    }
+
     @Published var status: Status = .idle
     @Published var session: UserSession?
     @Published var quickConnectCode: String?
+    /** Non-nil shows the "unencrypted connection" confirmation alert. */
+    @Published var pendingInsecure: PendingInsecureConnection?
     /// Every account this install knows (shared module owns the format).
     @Published var profiles: [PersistedSession] = []
     /// True while the user is logging into an additional account from the
@@ -40,6 +50,28 @@ final class AppModel: ObservableObject {
             deviceId = UUID().uuidString
             api = Self.makeApi(deviceId: deviceId)
         }
+        wireApi()
+    }
+
+    /// The server rejected our token: the session is dead and every call
+    /// will 401. Drop the profile and land back on sign-in.
+    private func wireApi() {
+        api.onUnauthorized = { [weak self] in
+            DispatchQueue.main.async { self?.handleSessionExpired() }
+        }
+    }
+
+    private func handleSessionExpired() {
+        guard let current = session else { return }
+        if let profile = profiles.first(where: { $0.profileKey == current.profileKey }) {
+            let updated = PersistedProfiles(profiles: profiles)
+                .withoutProfile(profile: profile)
+            profiles = updated.profiles
+            SessionStore.saveProfiles(updated)
+        }
+        session = nil
+        addingProfile = false
+        status = .failure("Session expired — please sign in again")
     }
 
     private static func makeApi(deviceId: String) -> JellyfinApi {
@@ -60,6 +92,7 @@ final class AppModel: ObservableObject {
         deviceId = profile.deviceId
         api = Self.makeApi(deviceId: profile.deviceId)
         api.restoreSession(restored: profile.session)
+        wireApi()
         session = profile.session
     }
 
@@ -68,6 +101,7 @@ final class AppModel: ObservableObject {
     func startAddProfile() {
         deviceId = UUID().uuidString
         api = Self.makeApi(deviceId: deviceId)
+        wireApi()
         status = .idle
         quickConnectCode = nil
         addingProfile = true
@@ -101,6 +135,22 @@ final class AppModel: ObservableObject {
         quickConnectCode = nil
         Task {
             do {
+                // Same unencrypted-connection gate as password login: the
+                // token would come back (and streams flow) in clear text
+                let server = try await api.resolveServer(rawUrl: serverUrl)
+                if JellyfinApi.companion.isInsecureDowngrade(
+                    rawInput: serverUrl,
+                    resolvedBaseUrl: server.baseUrl
+                ) {
+                    pendingInsecure = PendingInsecureConnection(
+                        baseUrl: server.baseUrl,
+                        username: "",
+                        password: "",
+                        quickConnect: true
+                    )
+                    status = .idle
+                    return
+                }
                 // KotlinPair bridges both components as optionals
                 let started = try await api.initiateQuickConnect(rawUrl: serverUrl)
                 guard let baseUrl = started.first as? String,
@@ -160,17 +210,70 @@ final class AppModel: ObservableObject {
         status = .loading
         Task {
             do {
-                let session = try await api.login(
-                    rawUrl: serverUrl,
+                // Resolve BEFORE sending credentials: a scheme-less input
+                // that only answers over plain http needs the user's
+                // explicit go-ahead first
+                let server = try await api.resolveServer(rawUrl: serverUrl)
+                if JellyfinApi.companion.isInsecureDowngrade(
+                    rawInput: serverUrl,
+                    resolvedBaseUrl: server.baseUrl
+                ) {
+                    pendingInsecure = PendingInsecureConnection(
+                        baseUrl: server.baseUrl,
+                        username: username,
+                        password: password,
+                        quickConnect: false
+                    )
+                    status = .idle
+                    return
+                }
+                try await performLogin(
+                    baseUrl: server.baseUrl,
                     username: username,
                     password: password
                 )
-                adopt(session: session)
-                status = .idle
             } catch {
                 status = .failure(error.localizedDescription)
             }
         }
+    }
+
+    private func performLogin(baseUrl: String, username: String, password: String) async throws {
+        let session = try await api.login(
+            rawUrl: baseUrl,
+            username: username,
+            password: password
+        )
+        adopt(session: session)
+        status = .idle
+    }
+
+    /// The user accepted the unencrypted connection — resume with the
+    /// resolved http URL (explicit scheme, no second downgrade).
+    func confirmInsecureConnection() {
+        guard let pending = pendingInsecure else { return }
+        pendingInsecure = nil
+        if pending.quickConnect {
+            startQuickConnect(serverUrl: pending.baseUrl)
+        } else {
+            status = .loading
+            Task {
+                do {
+                    try await performLogin(
+                        baseUrl: pending.baseUrl,
+                        username: pending.username,
+                        password: pending.password
+                    )
+                } catch {
+                    status = .failure(error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    func cancelInsecureConnection() {
+        pendingInsecure = nil
+        status = .idle
     }
 }
 
@@ -259,6 +362,24 @@ struct ConnectView: View {
                 }
             }
             .navigationTitle(model.addingProfile ? "Add Profile" : "Jellystream")
+            // Shown BEFORE any credential leaves the device: the server
+            // only answered over plain http for a scheme-less input
+            .alert(
+                "Unencrypted connection",
+                isPresented: Binding(
+                    get: { model.pendingInsecure != nil },
+                    set: { if !$0 { model.cancelInsecureConnection() } }
+                )
+            ) {
+                Button("Connect Anyway", role: .destructive) {
+                    model.confirmInsecureConnection()
+                }
+                Button("Cancel", role: .cancel) {
+                    model.cancelInsecureConnection()
+                }
+            } message: {
+                Text("This server is only reachable over plain HTTP. Your password and streams would travel unencrypted on the network.")
+            }
             #if os(tvOS)
             .onExitCommand {
                 if model.addingProfile { model.cancelAddProfile() }
