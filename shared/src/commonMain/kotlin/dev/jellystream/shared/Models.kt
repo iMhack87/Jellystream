@@ -143,7 +143,12 @@ data class BaseItem(
     @SerialName("BackdropImageTags") val backdropImageTags: List<String>? = null,
     @SerialName("ParentBackdropItemId") val parentBackdropItemId: String? = null,
     @SerialName("ParentBackdropImageTags") val parentBackdropImageTags: List<String>? = null,
+    @SerialName("PremiereDate") val premiereDate: String? = null,
 ) {
+    /** "yyyy-MM-dd" air date, null when the server didn't send one. */
+    val premiereDateIso: String?
+        get() = premiereDate?.takeIf { it.length >= 10 }?.take(10)
+
     /** Direct playback targets — the single source of truth for both platforms. */
     val isPlayable: Boolean
         get() = type == "Movie" || type == "Episode"

@@ -32,7 +32,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -228,75 +227,181 @@ fun SeriesScreen(
         runCatching { episodes = api.getEpisodes(series.id, season.id) }
     }
 
+    // Apple TV-style series page: big title over the backdrop, season
+    // pills, and a horizontal shelf of landscape episode cards
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(bottom = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
-        item {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
+        item(key = "header") {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(260.dp),
             ) {
-                FloatingNavButton(onClick = onBack)
-                Text(series.name ?: "", style = MaterialTheme.typography.headlineMedium)
+                AsyncImage(
+                    model = api.backdropUrl(series, 1280),
+                    contentDescription = series.name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                0.0f to Color.Black.copy(alpha = 0.35f),
+                                0.35f to Color.Transparent,
+                                1.0f to CinemaColors.Background,
+                            )
+                        ),
+                )
+                Text(
+                    series.name ?: "",
+                    style = MaterialTheme.typography.headlineLarge,
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                )
+                FloatingNavButton(
+                    onClick = onBack,
+                    modifier = Modifier.align(Alignment.TopStart),
+                )
             }
         }
         error?.let {
-            item { Text(it, color = MaterialTheme.colorScheme.error) }
+            item { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 20.dp)) }
         }
-        item {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        item(key = "seasons") {
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(horizontal = 20.dp),
+            ) {
                 items(seasons, key = { it.id }) { season ->
-                    FilterChip(
-                        selected = season.id == selectedSeason?.id,
-                        onClick = { selectedSeason = season },
-                        label = { Text(season.name ?: "Season") },
+                    val selected = season.id == selectedSeason?.id
+                    Text(
+                        season.name ?: "Season",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = if (selected) Color.Black else Color.White,
+                        modifier = Modifier
+                            // The screen's primary control owns initial
+                            // focus on TV (same rule as Play on Detail)
+                            .then(if (selected) Modifier.tvDefaultFocus() else Modifier)
+                            .dpadFocusEffect(CircleShape)
+                            .clip(CircleShape)
+                            .background(
+                                if (selected) Color.White else Color.White.copy(alpha = 0.15f)
+                            )
+                            .clickable { selectedSeason = season }
+                            .padding(horizontal = 18.dp, vertical = 8.dp),
                     )
                 }
             }
         }
-        items(episodes, key = { it.id }) { episode ->
-            EpisodeRow(api, episode, onPlay)
+        item(key = "episodes") {
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+            ) {
+                items(episodes, key = { it.id }) { episode ->
+                    EpisodeCard(api, episode, onPlay)
+                }
+            }
         }
     }
 }
 
+/**
+ * ATV episode lockup: landscape still with runtime badge and watched
+ * progress, then number eyebrow, title, synopsis and air date below.
+ */
 @Composable
-private fun EpisodeRow(api: JellyfinApi, episode: BaseItem, onPlay: (BaseItem) -> Unit) {
-    Surface(
-        onClick = { onPlay(episode) },
-        shape = RoundedCornerShape(8.dp),
-        modifier = Modifier.dpadFocusEffect(RoundedCornerShape(8.dp)),
+private fun EpisodeCard(api: JellyfinApi, episode: BaseItem, onPlay: (BaseItem) -> Unit) {
+    Column(
+        modifier = Modifier
+            .width(290.dp)
+            .dpadFocusEffect(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(12.dp))
+            .clickable { onPlay(episode) }
+            .padding(4.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(160.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(CinemaColors.SurfaceVariant),
         ) {
             AsyncImage(
-                model = api.imageUrl(episode, 300),
+                model = api.imageUrl(episode, 600),
                 contentDescription = episode.name,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .width(120.dp)
-                    .height(68.dp)
-                    .clip(RoundedCornerShape(6.dp)),
+                modifier = Modifier.fillMaxSize(),
             )
-            Column {
-                episode.episodeLabel?.let {
-                    Text(it, style = MaterialTheme.typography.labelMedium)
-                }
-                Text(
-                    episode.name ?: "",
-                    style = MaterialTheme.typography.bodyLarge,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                episode.runtimeMinutes?.let {
-                    Text("$it min", style = MaterialTheme.typography.bodySmall)
+            episode.playedFraction?.let { fraction ->
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .fillMaxWidth()
+                        .height(4.dp)
+                        .background(CinemaColors.ProgressTrack),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(fraction.toFloat())
+                            .height(4.dp)
+                            .background(Color.White),
+                    )
                 }
             }
+            episode.runtimeMinutes?.let {
+                Text(
+                    "$it min",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(10.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.55f))
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            }
+        }
+        episode.indexNumber?.let {
+            Text(
+                "EPISODE $it",
+                style = MaterialTheme.typography.labelSmall,
+                color = CinemaColors.TextSecondary,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+        Text(
+            episode.name ?: "",
+            style = MaterialTheme.typography.titleMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        episode.overview?.takeIf { it.isNotEmpty() }?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                color = CinemaColors.TextSecondary,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        episode.premiereDateIso?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.labelSmall,
+                color = CinemaColors.TextSecondary,
+            )
         }
     }
 }

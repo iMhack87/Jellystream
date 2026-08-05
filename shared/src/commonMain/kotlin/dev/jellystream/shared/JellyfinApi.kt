@@ -253,7 +253,12 @@ class JellyfinApi(
     /** Episodes of a series, optionally restricted to one season. */
     suspend fun getEpisodes(seriesId: String, seasonId: String?): List<BaseItem> {
         val s = requireSession()
-        val params = mutableListOf("userId" to s.userId)
+        val params = mutableListOf(
+            "userId" to s.userId,
+            // Synopsis and air date feed the ATV-style episode cards;
+            // neither is in the default episode DTO
+            "fields" to "Overview,PremiereDate",
+        )
         if (seasonId != null) params.add("seasonId" to seasonId)
         return authGet<ItemsResult>(
             "Shows/$seriesId/Episodes",
