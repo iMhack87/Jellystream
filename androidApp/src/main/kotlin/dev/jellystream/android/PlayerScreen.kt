@@ -208,14 +208,18 @@ private fun PlayerSurface(
 
                     // The track list only exists once demuxing has started,
                     // which is why the default is applied here and not at
-                    // build time. Applied once: after that the track panel
-                    // belongs to the viewer.
+                    // build time. It arrives in instalments though — the
+                    // first callback carried video and audio only, and
+                    // settling for it left ExoPlayer's own pick (the forced
+                    // English track) on screen. So: keep trying until the
+                    // wanted track is actually there, then stop for good and
+                    // leave the panel to the viewer.
                     private var defaultApplied = false
 
                     override fun onTracksChanged(tracks: Tracks) {
-                        if (defaultApplied || tracks.groups.isEmpty()) return
-                        defaultApplied = true
-                        applySubtitleDefault(this@apply, tracks, desiredSubtitle)
+                        if (defaultApplied) return
+                        defaultApplied =
+                            applySubtitleDefault(this@apply, tracks, desiredSubtitle)
                     }
                 })
             }
@@ -373,37 +377,36 @@ private fun applySubtitleDefault(
     player: Player,
     tracks: Tracks,
     desired: MediaStream?,
-) {
+): Boolean {
     val base = player.trackSelectionParameters.buildUpon()
     if (desired == null) {
         // Off, not "whatever ExoPlayer would have picked"
         player.trackSelectionParameters = base
             .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
             .build()
-        return
+        return true
     }
-    val group = tracks.groups
+    val match = tracks.groups
         .filter { it.type == C.TRACK_TYPE_TEXT }
-        .firstOrNull { group ->
-            (0 until group.length).any { i ->
+        .firstNotNullOfOrNull { group ->
+            (0 until group.length).firstOrNull { i ->
                 val format = group.getTrackFormat(i)
                 val forced = (format.selectionFlags and C.SELECTION_FLAG_FORCED) != 0
                 LanguageCode.matches(format.language, desired.language) &&
                     forced == desired.isForced
-            }
+            }?.let { group to it }
         }
+        // Not here yet: the text tracks may still be being parsed. Say so,
+        // so the caller asks again rather than settling for ExoPlayer's own
+        // pick — which prefers a forced track matching the audio.
+        ?: return false
+
+    val (group, trackIndex) = match
     player.trackSelectionParameters = base
         .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-        .apply {
-            if (group != null) {
-                setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, 0))
-            } else {
-                // The stream the picker saw is not among the player's own
-                // tracks — ask by language rather than force a wrong one
-                setPreferredTextLanguage(desired.language)
-            }
-        }
+        .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, trackIndex))
         .build()
+    return true
 }
 
 private fun subtitleMimeType(codec: String?): String? = when (codec?.lowercase()) {
