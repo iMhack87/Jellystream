@@ -30,6 +30,17 @@ struct SettingsView: View {
     /// Filled in from the server's public info — a ping, no auth needed.
     @State private var serverVersion: String?
 
+    /// Every library the server offers, switched on or off for the home
+    /// screen. Empty when the call fails: no section beats a broken one.
+    @State private var libraries: [BaseItem] = []
+
+    private func showsLibrary(_ view: BaseItem) -> Binding<Bool> {
+        Binding(
+            get: { settings.showsLibrary(view: view) },
+            set: { onChange(settings.withLibraryShown(view: view, shown: $0)) }
+        )
+    }
+
     private var alwaysTranscode: Binding<Bool> {
         Binding(
             get: { settings.alwaysTranscode },
@@ -60,6 +71,20 @@ struct SettingsView: View {
                 Text("Account")
             }
 
+            if !libraries.isEmpty {
+                Section {
+                    // Every library the server offers is listed, including
+                    // the music and photo ones this player starts with
+                    // switched off — hidden is a choice here, never a
+                    // library the user can no longer find.
+                    ForEach(libraries, id: \.id) { view in
+                        Toggle(view.name ?? "Library", isOn: showsLibrary(view))
+                    }
+                } header: {
+                    Text("Home Screen")
+                }
+            }
+
             Section {
                 Toggle("Always Transcode", isOn: alwaysTranscode)
             } header: {
@@ -87,6 +112,7 @@ struct SettingsView: View {
             // Best effort: an unreachable server just leaves the row out
             serverVersion = try? await api
                 .getPublicSystemInfo(serverUrl: session.baseUrl).version
+            libraries = (try? await api.getUserViews()) ?? []
         }
     }
 

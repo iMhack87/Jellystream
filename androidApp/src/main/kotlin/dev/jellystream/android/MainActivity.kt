@@ -625,8 +625,11 @@ private fun HomeScreen(
 ) {
     var sections by remember { mutableStateOf<List<LibrarySection>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    val settings = LocalAppSettings.current
 
-    LaunchedEffect(session) {
+    // Keyed on the library choices too: turning one on in Settings must
+    // show its row on the way back, not on the next cold start
+    LaunchedEffect(session, settings.libraryOverrides) {
         try {
             val result = mutableListOf<LibrarySection>()
             runCatching { api.getResumeItems(12) }.getOrDefault(emptyList())
@@ -635,7 +638,7 @@ private fun HomeScreen(
             runCatching { api.getNextUp(12) }.getOrDefault(emptyList())
                 .takeIf { it.isNotEmpty() }
                 ?.let { result.add(LibrarySection("Next Up", "nextup", it)) }
-            api.getUserViews().forEach { view ->
+            settings.visibleLibraries(api.getUserViews()).forEach { view ->
                 // One failing view must not blank the whole home screen
                 val latest = runCatching { api.getLatestItems(view.id, 12) }
                     .getOrDefault(emptyList())

@@ -20,11 +20,32 @@ data class AppSettings(
      * default, since Direct Play is the whole point of the app.
      */
     val alwaysTranscode: Boolean = false,
+
+    /**
+     * Per-library answers to "show this on the home screen", by view id.
+     *
+     * Only what the user actually decided is stored. A library that is
+     * absent falls back to [LibraryVisibility.showsByDefault], so a
+     * library added on the server later appears on its own instead of
+     * staying invisible until someone finds this screen.
+     */
+    val libraryOverrides: Map<String, Boolean> = emptyMap(),
 ) {
     // Kotlin default arguments and data-class copy() don't survive the
     // bridge to Swift, so every mutation gets a named helper here rather
     // than a copy() call site the Apple app can't spell.
     fun withAlwaysTranscode(value: Boolean): AppSettings = copy(alwaysTranscode = value)
+
+    /** Does this library belong on the home screen? */
+    fun showsLibrary(view: BaseItem): Boolean =
+        libraryOverrides[view.id] ?: LibraryVisibility.showsByDefault(view)
+
+    fun withLibraryShown(view: BaseItem, shown: Boolean): AppSettings =
+        copy(libraryOverrides = libraryOverrides + (view.id to shown))
+
+    /** The libraries to build home rows from, in server order. */
+    fun visibleLibraries(views: List<BaseItem>): List<BaseItem> =
+        views.filter { showsLibrary(it) }
 
     companion object {
         val Defaults = AppSettings()
@@ -36,6 +57,29 @@ data class AppSettings(
          */
         fun defaults(): AppSettings = Defaults
     }
+}
+
+/**
+ * Which of the server's libraries a video player has any business showing.
+ *
+ * Jellyfin happily serves music, photos, books and playlists next to the
+ * films, and a home screen that lists all of them buries what the user
+ * came for. These start hidden — one switch away in Settings, never gone.
+ *
+ * The rule is a short exclusion list rather than a list of allowed types
+ * on purpose: an unknown or future collection type shows up, which is the
+ * recoverable mistake. Hiding a library nobody can find again is not.
+ */
+object LibraryVisibility {
+    /**
+     * Collection types a video player has nothing to do with. Music
+     * *videos* are not among them — those are films to this app; only
+     * the audio-only library is.
+     */
+    private val NON_VIDEO = setOf("music", "books", "photos", "playlists", "livetv")
+
+    fun showsByDefault(view: BaseItem): Boolean =
+        view.collectionType?.lowercase() !in NON_VIDEO
 }
 
 /**

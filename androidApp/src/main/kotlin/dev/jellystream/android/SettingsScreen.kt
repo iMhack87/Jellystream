@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.jellystream.shared.AppSettings
+import dev.jellystream.shared.BaseItem
 import dev.jellystream.shared.JellyfinApi
 import dev.jellystream.shared.PersistedSettings
 import dev.jellystream.shared.UserSession
@@ -83,6 +84,12 @@ fun SettingsScreen(
     LaunchedEffect(session.baseUrl) {
         serverVersion = runCatching { api.getPublicSystemInfo(session.baseUrl).version }
             .getOrNull()
+    }
+
+    // Same deal: no libraries listed is better than a screen that fails
+    var libraries by remember { mutableStateOf<List<BaseItem>>(emptyList()) }
+    LaunchedEffect(session.userId) {
+        libraries = runCatching { api.getUserViews() }.getOrDefault(emptyList())
     }
 
     Box(modifier = Modifier.fillMaxSize().background(CinemaColors.Background)) {
@@ -135,6 +142,27 @@ fun SettingsScreen(
                         onClick = onLogout,
                         tint = MaterialTheme.colorScheme.error,
                     )
+                }
+            }
+
+            if (libraries.isNotEmpty()) {
+                item(key = "libraries") {
+                    // Every library the server offers is listed, including
+                    // the music and photo ones this player starts with
+                    // switched off — hidden is a choice here, never a
+                    // library the user can no longer find.
+                    SettingsSection("Home screen") {
+                        libraries.forEach { view ->
+                            SettingsToggle(
+                                title = view.name ?: "Library",
+                                subtitle = null,
+                                checked = settings.showsLibrary(view),
+                                onCheckedChange = {
+                                    onChange(settings.withLibraryShown(view, it))
+                                },
+                            )
+                        }
+                    }
                 }
             }
 
@@ -213,7 +241,7 @@ private fun SettingsSection(title: String, content: @Composable () -> Unit) {
 @Composable
 private fun SettingsToggle(
     title: String,
-    subtitle: String,
+    subtitle: String?,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
 ) {
@@ -229,11 +257,15 @@ private fun SettingsToggle(
                 style = MaterialTheme.typography.bodyLarge,
                 color = CinemaColors.TextPrimary,
             )
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = CinemaColors.TextSecondary,
-            )
+            // A library row is its own explanation; only settings that
+            // can bite carry a caption
+            subtitle?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = CinemaColors.TextSecondary,
+                )
+            }
         }
         Switch(
             checked = checked,
