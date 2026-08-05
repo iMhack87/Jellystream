@@ -58,4 +58,85 @@ class SettingsTest {
         // Callers fall back to defaults: bad settings must never block launch
         assertNull(PersistedSettings.fromJson("not json at all"))
     }
+
+    private fun view(id: String, name: String, type: String?) =
+        BaseItem(id = id, name = name, type = "CollectionFolder", collectionType = type)
+
+    @Test
+    fun videoLibrariesShowByDefault() {
+        assertTrue(AppSettings.Defaults.showsLibrary(view("1", "Movies", "movies")))
+        assertTrue(AppSettings.Defaults.showsLibrary(view("2", "Shows", "tvshows")))
+        // Music *videos* are films to this app, unlike the audio library
+        assertTrue(AppSettings.Defaults.showsLibrary(view("3", "Clips", "musicvideos")))
+        assertTrue(AppSettings.Defaults.showsLibrary(view("4", "Home movies", "homevideos")))
+    }
+
+    @Test
+    fun audioAndStillsAreHiddenByDefault() {
+        // All four exist on demo.jellyfin.org and cannot be played here
+        assertFalse(AppSettings.Defaults.showsLibrary(view("5", "Music", "music")))
+        assertFalse(AppSettings.Defaults.showsLibrary(view("6", "Playlists", "playlists")))
+        assertFalse(AppSettings.Defaults.showsLibrary(view("7", "Photos", "photos")))
+        assertFalse(AppSettings.Defaults.showsLibrary(view("8", "Books", "books")))
+    }
+
+    @Test
+    fun collectionTypeIsMatchedCaseInsensitively() {
+        assertFalse(AppSettings.Defaults.showsLibrary(view("9", "Music", "Music")))
+    }
+
+    @Test
+    fun unknownAndMixedLibrariesShowRatherThanVanish() {
+        // A mixed folder sends no collection type, and new Jellyfin
+        // versions invent types — showing one too many is recoverable,
+        // hiding a library nobody can find again is not
+        assertTrue(AppSettings.Defaults.showsLibrary(view("10", "Mixed", null)))
+        assertTrue(AppSettings.Defaults.showsLibrary(view("11", "Something new", "holograms")))
+    }
+
+    @Test
+    fun theUserOverridesEitherDefault() {
+        val music = view("5", "Music", "music")
+        val movies = view("1", "Movies", "movies")
+        val settings = AppSettings.Defaults
+            .withLibraryShown(music, true)
+            .withLibraryShown(movies, false)
+
+        assertTrue(settings.showsLibrary(music))
+        assertFalse(settings.showsLibrary(movies))
+    }
+
+    @Test
+    fun visibleLibrariesKeepsServerOrder() {
+        val views = listOf(
+            view("1", "Movies", "movies"),
+            view("5", "Music", "music"),
+            view("6", "Playlists", "playlists"),
+            view("2", "Shows", "tvshows"),
+        )
+
+        assertEquals(listOf("Movies", "Shows"), AppSettings.Defaults.visibleLibraries(views).map { it.name })
+    }
+
+    @Test
+    fun libraryChoicesSurviveTheJsonRoundTrip() {
+        val settings = AppSettings.Defaults.withLibraryShown(view("5", "Music", "music"), true)
+        val blob = PersistedSettings.empty().withSettings("srv|alice", settings).toJson()
+
+        val decoded = PersistedSettings.fromJson(blob)!!.forProfile("srv|alice")
+
+        assertTrue(decoded.showsLibrary(view("5", "Music", "music")))
+    }
+
+    @Test
+    fun anOlderBlobWithoutLibrariesStillDecodes() {
+        // Settings written before this feature existed
+        val old = """{"byProfile":{"srv|alice":{"alwaysTranscode":true}}}"""
+
+        val decoded = PersistedSettings.fromJson(old)!!.forProfile("srv|alice")
+
+        assertTrue(decoded.alwaysTranscode)
+        assertTrue(decoded.showsLibrary(view("1", "Movies", "movies")))
+        assertFalse(decoded.showsLibrary(view("5", "Music", "music")))
+    }
 }

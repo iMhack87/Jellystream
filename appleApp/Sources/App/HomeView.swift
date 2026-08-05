@@ -144,7 +144,19 @@ struct HomeView: View {
             }
         }
         .background(Color.black)
-        .task { await load() }
+        // Keyed on the library choices: turning one on in Settings must
+        // show its row on the way back, not on the next cold start
+        .task(id: libraryChoiceKey) { await load() }
+    }
+
+    /// A stable, hashable stamp of the per-library switches. The bridged
+    /// dictionary itself carries `KotlinBoolean` values, which is more
+    /// than `task(id:)` should have to reason about.
+    private var libraryChoiceKey: String {
+        settings.libraryOverrides
+            .map { "\($0.key)=\($0.value)" }
+            .sorted()
+            .joined(separator: ",")
     }
 
     private func load() async {
@@ -156,7 +168,7 @@ struct HomeView: View {
             if let nextUp = try? await api.getNextUp(limit: 12), !nextUp.isEmpty {
                 result.append(LibrarySection(title: "Next Up", key: "nextup", items: nextUp))
             }
-            let views = try await api.getUserViews()
+            let views = settings.visibleLibraries(views: try await api.getUserViews())
             for view in views {
                 // One failing view must not blank the whole home screen
                 let latest = (try? await api.getLatestItems(viewId: view.id, limit: 12)) ?? []
