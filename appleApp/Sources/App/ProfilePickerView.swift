@@ -66,20 +66,7 @@ struct ProfilePickerView: View {
 
     private func profileLabel(_ profile: PersistedSession) -> some View {
         VStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [Color(white: 0.25), Color(white: 0.12)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                Text(profile.initial)
-                    .font(.system(size: avatarSize * 0.4, weight: .bold))
-                    .foregroundStyle(.white)
-            }
-            .frame(width: avatarSize, height: avatarSize)
+            AvatarCircle(initial: profile.initial, size: avatarSize)
 
             Text(profile.displayName)
                 .font(.headline)

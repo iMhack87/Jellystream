@@ -31,10 +31,16 @@ final class AppModel: ObservableObject {
     /// profile picker — shows ConnectView with a way back.
     @Published var addingProfile = false
 
+    /// The active profile's preferences. Settings are per account, so this
+    /// is reloaded on every profile switch alongside the api.
+    @Published private(set) var settings: AppSettings = AppSettings.companion.defaults()
+
     /// Rebuilt on profile switch: Jellyfin ties sessions to DeviceId and
     /// every profile carries its own.
     @Published private(set) var api: JellyfinApi
     private var deviceId: String
+    /// Every profile's settings, including the inactive ones.
+    private var storedSettings: PersistedSettings = SettingsStore.load()
 
     init() {
         let stored = SessionStore.loadProfiles()
@@ -46,6 +52,7 @@ final class AppModel: ObservableObject {
             api = Self.makeApi(deviceId: only.deviceId)
             api.restoreSession(restored: only.session)
             session = only.session
+            settings = storedSettings.forProfile(profileKey: only.profileKey)
         } else {
             deviceId = UUID().uuidString
             api = Self.makeApi(deviceId: deviceId)
@@ -74,6 +81,7 @@ final class AppModel: ObservableObject {
                 .withoutProfile(profile: profile)
             profiles = updated.profiles
             SessionStore.saveProfiles(updated)
+            dropSettings(profileKey: profile.profileKey)
         }
         session = nil
         addingProfile = false
@@ -101,6 +109,23 @@ final class AppModel: ObservableObject {
         api.restoreSession(restored: profile.session)
         wireApi()
         session = profile.session
+        settings = storedSettings.forProfile(profileKey: profile.profileKey)
+    }
+
+    /// Persists a settings change for the active profile.
+    func update(settings newSettings: AppSettings) {
+        settings = newSettings
+        guard let key = session?.profileKey else { return }
+        storedSettings = storedSettings.withSettings(profileKey: key, settings: newSettings)
+        SettingsStore.save(storedSettings)
+    }
+
+    /// Forgets a signed-out account's preferences — nothing should survive
+    /// an account the install no longer knows.
+    private func dropSettings(profileKey: String) {
+        storedSettings = storedSettings.withoutProfile(profileKey: profileKey)
+        SettingsStore.save(storedSettings)
+        settings = AppSettings.companion.defaults()
     }
 
     /// New accounts get a fresh DeviceId — two users sharing one would
@@ -113,6 +138,8 @@ final class AppModel: ObservableObject {
         status = .idle
         quickConnectCode = nil
         addingProfile = true
+        // The new account starts from defaults, not the last profile's
+        settings = AppSettings.companion.defaults()
     }
 
     func cancelAddProfile() {
@@ -134,6 +161,8 @@ final class AppModel: ObservableObject {
         profiles = updated.profiles
         SessionStore.saveProfiles(updated)
         self.session = session
+        // Signing back into a known account restores its preferences
+        settings = storedSettings.forProfile(profileKey: profile.profileKey)
         addingProfile = false
     }
 
@@ -209,6 +238,7 @@ final class AppModel: ObservableObject {
             let updated = PersistedProfiles(profiles: profiles).withoutProfile(profile: profile)
             profiles = updated.profiles
             SessionStore.saveProfiles(updated)
+            dropSettings(profileKey: profile.profileKey)
         }
         session = nil
         addingProfile = false
@@ -293,6 +323,8 @@ struct RootView: View {
             HomeView(
                 api: model.api,
                 session: session,
+                settings: model.settings,
+                onSettingsChange: { model.update(settings: $0) },
                 onLogout: { model.logout() },
                 onSwitchProfile: { model.switchProfile() }
             )

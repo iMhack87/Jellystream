@@ -11,87 +11,140 @@ struct LibrarySection: Identifiable {
 struct HomeView: View {
     let api: JellyfinApi
     let session: UserSession
+    let settings: AppSettings
+    let onSettingsChange: (AppSettings) -> Void
     let onLogout: () -> Void
     let onSwitchProfile: () -> Void
 
     @State private var sections: [LibrarySection]?
     @State private var error: String?
-    @State private var showSearch = false
     @State private var playingItem: BaseItem?
+    #if os(tvOS)
+    private enum Tab: Hashable { case home, search, profile }
+    @State private var tab: Tab = .home
+    #else
+    @State private var showSearch = false
+    @State private var showSettings = false
+    #endif
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if let error {
-                    Text(error).foregroundStyle(.red).padding()
-                } else if let sections {
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 36) {
-                            // Hero must be openable: first playable item or series
-                            if let hero = sections.flatMap(\.items)
-                                .first(where: { $0.isPlayable || $0.isSeries }) {
-                                HeroSection(
-                                    api: api,
-                                    item: hero,
-                                    onSwitchProfile: onSwitchProfile
-                                ) {
-                                    playingItem = hero
-                                }
-                            }
-                            ForEach(sections) { section in
-                                if section.key == "resume" || section.key == "nextup" {
-                                    ContinueRow(api: api, section: section)
-                                } else {
-                                    LibraryRow(api: api, section: section)
-                                }
-                            }
-                        }
-                        .padding(.bottom, 40)
-                    }
-                    .ignoresSafeArea(edges: .top)
-                } else {
-                    ProgressView()
-                }
-            }
-            .background(Color.black)
-            .navigationDestination(for: BaseItem.self) { item in
-                if item.isSeries {
-                    SeriesView(api: api, series: item)
-                } else {
-                    DetailView(api: api, item: item)
-                }
-            }
-            .navigationDestination(isPresented: $showSearch) {
-                SearchView(api: api)
-            }
-            #if !os(tvOS)
-            .toolbar {
-                Button {
-                    showSearch = true
-                } label: {
-                    Image(systemName: "magnifyingglass")
-                }
-                // Back to "who's watching" — also the only path from a
-                // single-profile install to adding a second account
-                Button {
-                    onSwitchProfile()
-                } label: {
-                    Image(systemName: "person.crop.circle")
-                }
-                Button {
-                    onLogout()
-                } label: {
-                    Image(systemName: "rectangle.portrait.and.arrow.right")
-                }
-            }
-            .toolbarColorScheme(.dark, for: .navigationBar)
-            #endif
-            .task { await load() }
+        content
+            // The player reads this at makeUIView time, before any
+            // .onAppear would have run — hence an environment value
+            .environment(\.appSettings, settings)
+            .preferredColorScheme(.dark)
             .fullScreenCover(item: $playingItem) { item in
                 PlayerScreen(api: api, item: item)
             }
+    }
+
+    #if os(tvOS)
+    /// tvOS has no toolbar, so the top tab bar is where navigation lives —
+    /// the Apple TV+ shape, with the account at the trailing end.
+    @ViewBuilder
+    private var content: some View {
+        TabView(selection: $tab) {
+            NavigationStack {
+                homeScroll
+                    .itemDestination(api: api)
+            }
+            .tabItem { Label("Home", systemImage: "house") }
+            .tag(Tab.home)
+
+            NavigationStack {
+                SearchView(api: api)
+                    .itemDestination(api: api)
+            }
+            .tabItem { Label("Search", systemImage: "magnifyingglass") }
+            .tag(Tab.search)
+
+            NavigationStack {
+                settingsScreen
+            }
+            .tabItem { Label(session.displayName, systemImage: "person.crop.circle") }
+            .tag(Tab.profile)
         }
-        .preferredColorScheme(.dark)
+    }
+    #else
+    @ViewBuilder
+    private var content: some View {
+        NavigationStack {
+            homeScroll
+                .itemDestination(api: api)
+                .navigationDestination(isPresented: $showSearch) {
+                    SearchView(api: api)
+                }
+                .toolbar {
+                    Button {
+                        showSearch = true
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    // The account button owns switching profile and signing
+                    // out — both live one tap deeper, in Settings
+                    Button {
+                        showSettings = true
+                    } label: {
+                        AvatarCircle(initial: session.initial, size: 28)
+                    }
+                }
+                .toolbarColorScheme(.dark, for: .navigationBar)
+        }
+        .sheet(isPresented: $showSettings) {
+            NavigationStack {
+                settingsScreen
+                    .toolbar {
+                        Button("Done") { showSettings = false }
+                    }
+            }
+            .preferredColorScheme(.dark)
+        }
+    }
+    #endif
+
+    private var settingsScreen: some View {
+        SettingsView(
+            api: api,
+            session: session,
+            settings: settings,
+            onChange: onSettingsChange,
+            onSwitchProfile: onSwitchProfile,
+            onLogout: onLogout
+        )
+    }
+
+    @ViewBuilder
+    private var homeScroll: some View {
+        Group {
+            if let error {
+                Text(error).foregroundStyle(.red).padding()
+            } else if let sections {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 36) {
+                        // Hero must be openable: first playable item or series
+                        if let hero = sections.flatMap(\.items)
+                            .first(where: { $0.isPlayable || $0.isSeries }) {
+                            HeroSection(api: api, item: hero) {
+                                playingItem = hero
+                            }
+                        }
+                        ForEach(sections) { section in
+                            if section.key == "resume" || section.key == "nextup" {
+                                ContinueRow(api: api, section: section)
+                            } else {
+                                LibraryRow(api: api, section: section)
+                            }
+                        }
+                    }
+                    .padding(.bottom, 40)
+                }
+                .ignoresSafeArea(edges: .top)
+            } else {
+                ProgressView()
+            }
+        }
+        .background(Color.black)
+        .task { await load() }
     }
 
     private func load() async {
@@ -118,6 +171,21 @@ struct HomeView: View {
 
 extension BaseItem: @retroactive Identifiable {}
 
+extension View {
+    /// Where a `NavigationLink(value: BaseItem)` lands. Every navigation
+    /// stack that shows items declares it — on tvOS home and search are
+    /// separate tabs, so separate stacks.
+    func itemDestination(api: JellyfinApi) -> some View {
+        navigationDestination(for: BaseItem.self) { item in
+            if item.isSeries {
+                SeriesView(api: api, series: item)
+            } else {
+                DetailView(api: api, item: item)
+            }
+        }
+    }
+}
+
 /** Platform metrics: TV needs generous margins and focus breathing room. */
 enum HomeMetrics {
     #if os(tvOS)
@@ -136,7 +204,6 @@ enum HomeMetrics {
 private struct HeroSection: View {
     let api: JellyfinApi
     let item: BaseItem
-    let onSwitchProfile: () -> Void
     let onPlay: () -> Void
 
     #if os(tvOS)
@@ -218,16 +285,6 @@ private struct HeroSection: View {
                     }
                     #if !os(tvOS)
                     .buttonStyle(.plain)
-                    #endif
-
-                    #if os(tvOS)
-                    // No toolbar on tvOS — the hero row is where the
-                    // switch-profile affordance lives (and the only path
-                    // from one profile to a second account)
-                    Button(action: onSwitchProfile) {
-                        Label("Profile", systemImage: "person.crop.circle")
-                            .font(.headline)
-                    }
                     #endif
                 }
                 #if os(tvOS)

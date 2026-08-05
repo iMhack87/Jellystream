@@ -26,8 +26,8 @@ import kotlinx.serialization.json.putJsonArray
  * belongs here in the shared module, never in platform code.
  */
 class JellyfinApi(
-    private val clientName: String = "Jellystream",
-    private val clientVersion: String = "0.1.0",
+    private val clientName: String = CLIENT_NAME,
+    private val clientVersion: String = CLIENT_VERSION,
     private val deviceName: String,
     private val deviceId: String,
 ) {
@@ -520,6 +520,14 @@ class JellyfinApi(
     }
 
     companion object {
+        /**
+         * How this client identifies itself to Jellyfin — and what the
+         * About section shows. One constant so the two apps can never drift
+         * apart in the `MediaBrowser` header the server logs per device.
+         */
+        const val CLIENT_NAME = "Jellystream"
+        const val CLIENT_VERSION = "0.1.0"
+
         /** Jellyfin wire format: 1 tick = 100 ns. */
         const val TICKS_PER_SECOND = 10_000_000L
 
