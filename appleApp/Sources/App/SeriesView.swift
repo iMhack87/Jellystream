@@ -102,19 +102,32 @@ struct SeriesView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 14) {
                 ForEach(seasons, id: \.id) { season in
-                    // SeasonPillStyle draws the capsule AND the focus
-                    // treatment itself — the system tvOS styles either
-                    // erase the selected label (tinted platter) or stack
-                    // their own platter behind ours (.plain's focus lift:
-                    // the pill-inside-a-pill Matthieu spotted)
+                    let selected = season.id == selectedSeason?.id
+                    #if os(tvOS)
+                    // Untouched system buttons so tvOS 26's Liquid Glass
+                    // (and the Focus Engine's color management) stay
+                    // intact — any custom background or label color
+                    // fights them. Selection reads as a checkmark, the
+                    // system idiom for pills that keep their glass look.
+                    Button {
+                        selectedSeason = season
+                    } label: {
+                        HStack(spacing: 8) {
+                            if selected {
+                                Image(systemName: "checkmark")
+                            }
+                            Text(season.name ?? "Season")
+                        }
+                        .font(.headline)
+                    }
+                    #else
                     Button {
                         selectedSeason = season
                     } label: {
                         Text(season.name ?? "Season")
                     }
-                    .buttonStyle(
-                        SeasonPillStyle(selected: season.id == selectedSeason?.id)
-                    )
+                    .buttonStyle(SeasonPillStyle(selected: selected))
+                    #endif
                 }
             }
             .padding(.horizontal, HomeMetrics.edgePadding)
@@ -161,42 +174,26 @@ struct SeriesView: View {
 }
 
 /**
- * Season pill drawing its own focus treatment: one single capsule that
- * scales and glows when the Siri Remote focuses it. No system platter, so
- * no stacked pill-in-pill. On touch platforms `isFocused` stays false and
- * this renders as the plain selected/unselected capsule.
+ * Touch-platform season pill: selected = solid white capsule, black text.
+ * tvOS uses untouched system buttons instead (Liquid Glass + Focus
+ * Engine own the visuals there; selection is a checkmark in the label).
  */
 private struct SeasonPillStyle: ButtonStyle {
     let selected: Bool
 
     func makeBody(configuration: Configuration) -> some View {
-        PillLabel(configuration: configuration, selected: selected)
-    }
-
-    private struct PillLabel: View {
-        let configuration: ButtonStyle.Configuration
-        let selected: Bool
-        @Environment(\.isFocused) private var focused
-
-        var body: some View {
-            configuration.label
-                .font(.headline)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 9)
-                .background(
-                    selected
-                        ? AnyShapeStyle(.white)
-                        : AnyShapeStyle(.white.opacity(focused ? 0.3 : 0.15)),
-                    in: Capsule()
-                )
-                .foregroundStyle(selected ? .black : .white)
-                #if os(tvOS)
-                .scaleEffect(focused ? 1.12 : 1.0)
-                .shadow(color: .black.opacity(focused ? 0.5 : 0), radius: 12, y: 6)
-                .animation(.easeOut(duration: 0.15), value: focused)
-                #endif
-                .opacity(configuration.isPressed ? 0.8 : 1.0)
-        }
+        configuration.label
+            .font(.headline)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 9)
+            .background(
+                selected
+                    ? AnyShapeStyle(.white)
+                    : AnyShapeStyle(.white.opacity(0.15)),
+                in: Capsule()
+            )
+            .foregroundStyle(selected ? .black : .white)
+            .opacity(configuration.isPressed ? 0.8 : 1.0)
     }
 }
 
