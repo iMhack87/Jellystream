@@ -192,6 +192,13 @@ private fun PlayerSurface(
             }
     }
 
+    // Reports must be in media time: a resumed transcode's player clock is
+    // window-relative, so the raw position would rewind the resume point
+    fun mediaPositionTicks(): Long =
+        JellyfinApi.millisecondsToTicks(
+            player.currentPosition + (positionOffsetSeconds * 1000).toLong()
+        )
+
     // Report start once, then position every 5 s while the screen is up
     LaunchedEffect(item.id) {
         runCatching { api.reportPlaybackStart(item.id, plan.playSessionId) }
@@ -200,7 +207,7 @@ private fun PlayerSurface(
             runCatching {
                 api.reportPlaybackProgress(
                     item.id,
-                    JellyfinApi.millisecondsToTicks(player.currentPosition),
+                    mediaPositionTicks(),
                     isPaused = !player.isPlaying,
                     playSessionId = plan.playSessionId,
                 )
@@ -210,7 +217,7 @@ private fun PlayerSurface(
 
     DisposableEffect(Unit) {
         onDispose {
-            val positionTicks = JellyfinApi.millisecondsToTicks(player.currentPosition)
+            val positionTicks = mediaPositionTicks()
             val playSessionId = plan.playSessionId
             player.release()
             playbackReportScope.launch {
