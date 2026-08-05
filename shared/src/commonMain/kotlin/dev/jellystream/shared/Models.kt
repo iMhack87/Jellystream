@@ -163,10 +163,12 @@ data class BaseItem(
 
     /**
      * Anti-spoiler rule, decided once for every platform: an episode
-     * still stays blurred until the user has started or finished it.
+     * still stays blurred until the user has WATCHED it — an episode in
+     * progress keeps the blur (with the progress bar on top), otherwise
+     * the still itself would spoil what comes next.
      */
     val shouldBlurPreview: Boolean
-        get() = !isWatched && playedFraction == null
+        get() = !isWatched
 
     /** Watched fraction 0.0–1.0 for progress bars, null when not started. */
     val playedFraction: Double?
