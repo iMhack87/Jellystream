@@ -243,7 +243,18 @@ data class MediaStream(
     @SerialName("DisplayTitle") val displayTitle: String? = null,
     @SerialName("IsExternal") val isExternal: Boolean = false,
     @SerialName("DeliveryUrl") val deliveryUrl: String? = null,
-)
+    /** Subtitles meant to burn through even when you speak the audio's language. */
+    @SerialName("IsForced") val isForced: Boolean = false,
+    @SerialName("IsDefault") val isDefault: Boolean = false,
+    /** SDH / CC — carries sound descriptions most viewers do not want by default. */
+    @SerialName("IsHearingImpaired") val isHearingImpaired: Boolean = false,
+) {
+    val isSubtitle: Boolean
+        get() = type == "Subtitle"
+
+    val isAudio: Boolean
+        get() = type == "Audio"
+}
 
 @Serializable
 data class MediaSourceInfo(

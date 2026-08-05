@@ -30,6 +30,23 @@ data class AppSettings(
      * staying invisible until someone finds this screen.
      */
     val libraryOverrides: Map<String, Boolean> = emptyMap(),
+
+    /**
+     * Subtitle language to look for, as an ISO code ("fre", "en", …).
+     * Null means no preference, which leaves only forced tracks.
+     */
+    val subtitleLanguage: String? = null,
+
+    /**
+     * [SubtitleMode], stored by name rather than as an enum on purpose.
+     * A blob written by a newer build carrying a mode this one has never
+     * heard of must cost the user that one setting — not every setting,
+     * which is what a failed decode of the whole file would do.
+     */
+    val subtitleModeName: String = SubtitleMode.SMART.name,
+
+    /** Subtitle size, 1.0 being the player's own. */
+    val subtitleScale: Double = 1.0,
 ) {
     // Kotlin default arguments and data-class copy() don't survive the
     // bridge to Swift, so every mutation gets a named helper here rather
@@ -47,7 +64,33 @@ data class AppSettings(
     fun visibleLibraries(views: List<BaseItem>): List<BaseItem> =
         views.filter { showsLibrary(it) }
 
+    /** Falls back to the default rather than throwing on an unknown name. */
+    val subtitleMode: SubtitleMode
+        get() = SubtitleMode.entries.firstOrNull { it.name == subtitleModeName }
+            ?: SubtitleMode.SMART
+
+    fun withSubtitleMode(mode: SubtitleMode): AppSettings =
+        copy(subtitleModeName = mode.name)
+
+    /** Blank clears the preference; the code itself is never validated here. */
+    fun withSubtitleLanguage(code: String?): AppSettings =
+        copy(subtitleLanguage = code?.trim()?.takeIf { it.isNotEmpty() })
+
+    /**
+     * Clamped: a scale of 0 makes subtitles invisible and a huge one hides
+     * the film, and neither is recoverable from the player.
+     */
+    fun withSubtitleScale(value: Double): AppSettings =
+        copy(subtitleScale = value.coerceIn(MIN_SUBTITLE_SCALE, MAX_SUBTITLE_SCALE))
+
+    /** The track to switch on for this source, or null for none. */
+    fun chooseSubtitle(subtitles: List<MediaStream>, audioLanguage: String?): MediaStream? =
+        SubtitleSelection.choose(subtitles, audioLanguage, subtitleLanguage, subtitleMode)
+
     companion object {
+        const val MIN_SUBTITLE_SCALE: Double = 0.5
+        const val MAX_SUBTITLE_SCALE: Double = 2.5
+
         val Defaults = AppSettings()
 
         /**

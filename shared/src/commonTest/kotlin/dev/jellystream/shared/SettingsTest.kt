@@ -139,4 +139,66 @@ class SettingsTest {
         assertTrue(decoded.showsLibrary(view("1", "Movies", "movies")))
         assertFalse(decoded.showsLibrary(view("5", "Music", "music")))
     }
+
+    @Test
+    fun subtitleDefaultsAreSmartAndUnscaled() {
+        assertEquals(SubtitleMode.SMART, AppSettings.Defaults.subtitleMode)
+        assertNull(AppSettings.Defaults.subtitleLanguage)
+        assertEquals(1.0, AppSettings.Defaults.subtitleScale)
+    }
+
+    @Test
+    fun anUnknownModeCostsThatSettingAndNothingElse() {
+        // Written by a future build. Decoding the blob must not fail:
+        // that would take every other preference down with it.
+        val fromTheFuture = """{"byProfile":{"srv|alice":{"alwaysTranscode":true,"subtitleModeName":"TELEPATHY","subtitleScale":1.5}}}"""
+
+        val decoded = PersistedSettings.fromJson(fromTheFuture)!!.forProfile("srv|alice")
+
+        assertEquals(SubtitleMode.SMART, decoded.subtitleMode)
+        assertTrue(decoded.alwaysTranscode)
+        assertEquals(1.5, decoded.subtitleScale)
+    }
+
+    @Test
+    fun subtitleScaleIsClampedBothWays() {
+        // Invisible subtitles and screen-filling ones are both unrecoverable
+        assertEquals(AppSettings.MIN_SUBTITLE_SCALE, AppSettings.Defaults.withSubtitleScale(0.0).subtitleScale)
+        assertEquals(AppSettings.MAX_SUBTITLE_SCALE, AppSettings.Defaults.withSubtitleScale(99.0).subtitleScale)
+        assertEquals(1.4, AppSettings.Defaults.withSubtitleScale(1.4).subtitleScale)
+    }
+
+    @Test
+    fun aBlankSubtitleLanguageClearsThePreference() {
+        assertEquals("fre", AppSettings.Defaults.withSubtitleLanguage(" fre ").subtitleLanguage)
+        assertNull(AppSettings.Defaults.withSubtitleLanguage("  ").subtitleLanguage)
+        assertNull(AppSettings.Defaults.withSubtitleLanguage(null).subtitleLanguage)
+    }
+
+    @Test
+    fun subtitlePreferencesSurviveTheJsonRoundTrip() {
+        val settings = AppSettings.Defaults
+            .withSubtitleLanguage("fre")
+            .withSubtitleMode(SubtitleMode.ALWAYS)
+            .withSubtitleScale(1.25)
+        val blob = PersistedSettings.empty().withSettings("srv|alice", settings).toJson()
+
+        val decoded = PersistedSettings.fromJson(blob)!!.forProfile("srv|alice")
+
+        assertEquals("fre", decoded.subtitleLanguage)
+        assertEquals(SubtitleMode.ALWAYS, decoded.subtitleMode)
+        assertEquals(1.25, decoded.subtitleScale)
+    }
+
+    @Test
+    fun settingsPickTheTrackForTheProfile() {
+        val settings = AppSettings.Defaults.withSubtitleLanguage("fre")
+        val tracks = listOf(
+            MediaStream(index = 1, type = "Subtitle", language = "eng"),
+            MediaStream(index = 2, type = "Subtitle", language = "fra"),
+        )
+
+        assertEquals(2, settings.chooseSubtitle(tracks, audioLanguage = "eng")?.index)
+        assertNull(settings.chooseSubtitle(tracks, audioLanguage = "fre"))
+    }
 }
