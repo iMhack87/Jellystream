@@ -102,28 +102,19 @@ struct SeriesView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 14) {
                 ForEach(seasons, id: \.id) { season in
-                    // Self-drawn pill on every platform: the system tvOS
-                    // style tints label and platter together, which erases
-                    // the selected label and hides unfocused pills. With
-                    // .plain the focus lift applies to this capsule itself.
+                    // SeasonPillStyle draws the capsule AND the focus
+                    // treatment itself — the system tvOS styles either
+                    // erase the selected label (tinted platter) or stack
+                    // their own platter behind ours (.plain's focus lift:
+                    // the pill-inside-a-pill Matthieu spotted)
                     Button {
                         selectedSeason = season
                     } label: {
                         Text(season.name ?? "Season")
-                            .font(.headline)
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 9)
-                            .background(
-                                season.id == selectedSeason?.id
-                                    ? AnyShapeStyle(.white)
-                                    : AnyShapeStyle(.white.opacity(0.15)),
-                                in: Capsule()
-                            )
-                            .foregroundStyle(
-                                season.id == selectedSeason?.id ? .black : .white
-                            )
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(
+                        SeasonPillStyle(selected: season.id == selectedSeason?.id)
+                    )
                 }
             }
             .padding(.horizontal, HomeMetrics.edgePadding)
@@ -166,6 +157,46 @@ struct SeriesView: View {
         #if os(tvOS)
         .scrollClipDisabled()
         #endif
+    }
+}
+
+/**
+ * Season pill drawing its own focus treatment: one single capsule that
+ * scales and glows when the Siri Remote focuses it. No system platter, so
+ * no stacked pill-in-pill. On touch platforms `isFocused` stays false and
+ * this renders as the plain selected/unselected capsule.
+ */
+private struct SeasonPillStyle: ButtonStyle {
+    let selected: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        PillLabel(configuration: configuration, selected: selected)
+    }
+
+    private struct PillLabel: View {
+        let configuration: ButtonStyle.Configuration
+        let selected: Bool
+        @Environment(\.isFocused) private var focused
+
+        var body: some View {
+            configuration.label
+                .font(.headline)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 9)
+                .background(
+                    selected
+                        ? AnyShapeStyle(.white)
+                        : AnyShapeStyle(.white.opacity(focused ? 0.3 : 0.15)),
+                    in: Capsule()
+                )
+                .foregroundStyle(selected ? .black : .white)
+                #if os(tvOS)
+                .scaleEffect(focused ? 1.12 : 1.0)
+                .shadow(color: .black.opacity(focused ? 0.5 : 0), radius: 12, y: 6)
+                .animation(.easeOut(duration: 0.15), value: focused)
+                #endif
+                .opacity(configuration.isPressed ? 0.8 : 1.0)
+        }
     }
 }
 
