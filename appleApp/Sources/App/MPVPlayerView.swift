@@ -133,7 +133,9 @@ final class PlayerModel: ObservableObject {
         timer?.invalidate()
         timer = nil
         guard let handle = mpv else { return }
-        let finalTicks = JellyfinApi.companion.secondsToTicks(seconds: timePos)
+        // Media time, not window time: a resumed transcode's clock starts
+        // at the resume point and reporting it raw would rewind the server
+        let finalTicks = JellyfinApi.companion.secondsToTicks(seconds: positionOffset + timePos)
         mpv = nil
         mpv_terminate_destroy(handle)
         // Fire-and-forget: the resume point must survive closing the player
@@ -209,7 +211,8 @@ final class PlayerModel: ObservableObject {
 
         // Every 10 ticks (~5 s), tell the server where we are
         if tickCount % 10 == 0 {
-            let ticks = JellyfinApi.companion.secondsToTicks(seconds: timePos)
+            // Media time (window position + transcode offset), like Android
+            let ticks = JellyfinApi.companion.secondsToTicks(seconds: positionOffset + timePos)
             let paused = isPaused
             Task { [api, item, playSessionId] in
                 try? await api.reportPlaybackProgress(
