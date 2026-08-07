@@ -13,6 +13,7 @@ struct HomeView: View {
     let session: UserSession
     let settings: AppSettings
     let seerr: JellyseerrApi
+    let downloader: Downloader?
     let profile: PersistedSession?
     let onSettingsChange: (AppSettings) -> Void
     let onProfileChange: (PersistedSession) -> Void
@@ -22,6 +23,13 @@ struct HomeView: View {
     @State private var sections: [LibrarySection]?
     @State private var error: String?
     @State private var playingItem: BaseItem?
+    @State private var downloadingAllowed: Bool?
+    @State private var offlineItem: DownloadedItem?
+    @State private var showDownloads = false
+
+    private var playableDownloads: Int {
+        Int(downloader?.downloads.playable.count ?? 0)
+    }
     #if os(tvOS)
     private enum Tab: Hashable { case home, search, profile }
     @State private var tab: Tab = .home
@@ -35,10 +43,55 @@ struct HomeView: View {
             // The player reads this at makeUIView time, before any
             // .onAppear would have run — hence an environment value
             .environment(\.appSettings, settings)
+            .environment(\.downloader, downloader)
+            .environment(\.downloadingAllowed, downloadingAllowed)
+            .task { downloadingAllowed = try? await api.canDownload()?.boolValue }
             .preferredColorScheme(.dark)
             .fullScreenCover(item: $playingItem) { item in
                 PlayerScreen(api: api, item: item, settings: settings)
             }
+            #if !os(tvOS)
+            .sheet(isPresented: $showDownloads) {
+                if let downloader, let profile {
+                    NavigationStack {
+                        DownloadsView(
+                            downloader: downloader,
+                            profileKey: profile.profileKey,
+                            onPlay: { item in
+                                showDownloads = false
+                                offlineItem = item
+                            }
+                        )
+                        .toolbar { Button("Done") { showDownloads = false } }
+                    }
+                    .preferredColorScheme(.dark)
+                }
+            }
+            .fullScreenCover(item: $offlineItem) { offline in
+                if let downloader, let profile {
+                    PlayerScreen(
+                        api: api,
+                        item: BaseItem(
+                            id: offline.itemId, name: offline.name, type: "Movie",
+                            collectionType: nil, productionYear: nil, imageTags: nil,
+                            seriesName: nil, seriesId: nil, userData: nil, overview: nil,
+                            runTimeTicks: offline.runTimeTicks, genres: nil,
+                            communityRating: nil, criticRating: nil, officialRating: nil,
+                            indexNumber: nil, parentIndexNumber: nil,
+                            backdropImageTags: nil, parentBackdropItemId: nil,
+                            parentBackdropImageTags: nil, premiereDate: nil
+                        ),
+                        settings: settings,
+                        localFile: downloadedFileURL(
+                            profileKey: profile.profileKey, item: offline
+                        ),
+                        onOfflinePosition: { ticks in
+                            downloader.recordPosition(itemId: offline.itemId, ticks: ticks)
+                        }
+                    )
+                }
+            }
+            #endif
     }
 
     #if os(tvOS)
@@ -111,9 +164,11 @@ struct HomeView: View {
             session: session,
             settings: settings,
             seerr: seerr,
+            downloader: downloader,
             profile: profile,
             onChange: onSettingsChange,
             onProfileChange: onProfileChange,
+            onPlayOffline: { offlineItem = $0 },
             onSwitchProfile: onSwitchProfile,
             onLogout: onLogout
         )
@@ -123,7 +178,27 @@ struct HomeView: View {
     private var homeScroll: some View {
         Group {
             if let error {
-                Text(error).foregroundStyle(.red).padding()
+                // Downloads exist precisely for this moment; a raw
+                // NSURLError dump and no way to them is the worst possible
+                // screen to meet on a train
+                VStack(spacing: 14) {
+                    Text("Can't reach the server.").font(.headline)
+                    if playableDownloads > 0 {
+                        Text(
+                            "\(playableDownloads) downloaded "
+                            + (playableDownloads == 1 ? "title is" : "titles are")
+                            + " still on this device."
+                        )
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        Button("Go to downloads") { showDownloads = true }
+                            .buttonStyle(.borderedProminent)
+                    } else {
+                        Text(error).font(.caption).foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                }
+                .padding(32)
             } else if let sections {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 36) {

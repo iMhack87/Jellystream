@@ -24,9 +24,11 @@ struct SettingsView: View {
     let session: UserSession
     let settings: AppSettings
     let seerr: JellyseerrApi
+    let downloader: Downloader?
     let profile: PersistedSession?
     let onChange: (AppSettings) -> Void
     let onProfileChange: (PersistedSession) -> Void
+    var onPlayOffline: (DownloadedItem) -> Void = { _ in }
     let onSwitchProfile: () -> Void
     let onLogout: () -> Void
 
@@ -139,6 +141,22 @@ struct SettingsView: View {
             } header: {
                 Text("Account")
             }
+
+            #if !os(tvOS)
+            // Offline is a phone and tablet feature: a television sits on
+            // the same network as the server and has nowhere to put 40 GB
+            if let downloader, let profile {
+                Section("Offline") {
+                    NavigationLink("Downloads") {
+                        DownloadsView(
+                            downloader: downloader,
+                            profileKey: profile.profileKey,
+                            onPlay: onPlayOffline
+                        )
+                    }
+                }
+            }
+            #endif
 
             Section {
                 Button {

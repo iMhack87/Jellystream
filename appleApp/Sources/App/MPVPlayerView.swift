@@ -29,6 +29,14 @@ final class PlayerModel: ObservableObject {
     /// here, and mpv needs them the moment the file loads.
     let settings: AppSettings
 
+    /// Set when playing a downloaded file. Offline there is nothing to
+    /// negotiate, no plan to fetch and no progress to post — a player that
+    /// quietly tries any of those hangs on a train.
+    var localFile: URL?
+    /// Where offline playback got to, handed back for the server to hear
+    /// about whenever the network returns.
+    var onOfflinePosition: ((Int64) -> Void)?
+
     @Published var timePos: Double = 0
     @Published var duration: Double = 0
     @Published var isPaused = false
@@ -54,10 +62,18 @@ final class PlayerModel: ObservableObject {
     private var pendingSubtitleDefault: MediaStream?
     private var subtitleDefaultPending = false
 
-    init(api: JellyfinApi, item: BaseItem, settings: AppSettings) {
+    init(
+        api: JellyfinApi,
+        item: BaseItem,
+        settings: AppSettings,
+        localFile: URL? = nil,
+        onOfflinePosition: ((Int64) -> Void)? = nil
+    ) {
         self.api = api
         self.item = item
         self.settings = settings
+        self.localFile = localFile
+        self.onOfflinePosition = onOfflinePosition
     }
 
     // Safety net if onDisappear never fires: free mpv and the timer.
@@ -93,6 +109,16 @@ final class PlayerModel: ObservableObject {
 
         guard mpv_initialize(handle) >= 0 else {
             shutdown()
+            return
+        }
+
+        // A downloaded file needs none of the negotiation below
+        if let localFile {
+            applySubtitleScale(settings.subtitleScale)
+            command("loadfile", localFile.path)
+            timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+                Task { @MainActor in self?.tick() }
+            }
             return
         }
 
@@ -153,6 +179,14 @@ final class PlayerModel: ObservableObject {
         timer?.invalidate()
         timer = nil
         guard let handle = mpv else { return }
+        // Offline: the position is kept locally, nothing is posted
+        if localFile != nil {
+            let ticks = JellyfinApi.companion.secondsToTicks(seconds: timePos)
+            mpv = nil
+            mpv_terminate_destroy(handle)
+            onOfflinePosition?(ticks)
+            return
+        }
         // Media time, not window time: a resumed transcode's clock starts
         // at the resume point and reporting it raw would rewind the server
         let finalTicks = JellyfinApi.companion.secondsToTicks(seconds: positionOffset + timePos)
@@ -379,9 +413,21 @@ struct PlayerScreen: View {
     // Settings arrive as a parameter, not from the environment: the model
     // is built in init, before @Environment is readable, and mpv needs the
     // subtitle preference at loadfile time.
-    init(api: JellyfinApi, item: BaseItem, settings: AppSettings) {
+    init(
+        api: JellyfinApi,
+        item: BaseItem,
+        settings: AppSettings,
+        localFile: URL? = nil,
+        onOfflinePosition: ((Int64) -> Void)? = nil
+    ) {
         _model = StateObject(
-            wrappedValue: PlayerModel(api: api, item: item, settings: settings)
+            wrappedValue: PlayerModel(
+                api: api,
+                item: item,
+                settings: settings,
+                localFile: localFile,
+                onOfflinePosition: onOfflinePosition
+            )
         )
     }
 
