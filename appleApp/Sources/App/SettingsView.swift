@@ -23,9 +23,19 @@ struct SettingsView: View {
     let api: JellyfinApi
     let session: UserSession
     let settings: AppSettings
+    let seerr: JellyseerrApi
+    let profile: PersistedSession?
     let onChange: (AppSettings) -> Void
+    let onProfileChange: (PersistedSession) -> Void
     let onSwitchProfile: () -> Void
     let onLogout: () -> Void
+
+    @State private var editingServer = false
+    @State private var signingIn = false
+    @State private var serverDraft = ""
+    @State private var password = ""
+    @State private var signInFailed = false
+    @State private var signingInBusy = false
 
     /// Filled in from the server's public info — a ping, no auth needed.
     @State private var serverVersion: String?
@@ -77,6 +87,22 @@ struct SettingsView: View {
             : label
     }
 
+    private func signIn() async {
+        guard let profile, let link = profile.jellyseerr else { return }
+        signingInBusy = true
+        seerr.configure(serverUrl: link.baseUrl, sessionCookie: nil)
+        let cookie = try? await seerr.signIn(username: session.displayName, password: password)
+        signingInBusy = false
+        password = ""
+        if let cookie {
+            signInFailed = false
+            onProfileChange(profile.withJellyseerrSession(cookie: cookie))
+        } else {
+            signInFailed = true
+            signingIn = true
+        }
+    }
+
     private func showsLibrary(_ view: BaseItem) -> Binding<Bool> {
         Binding(
             get: { settings.showsLibrary(view: view) },
@@ -112,6 +138,40 @@ struct SettingsView: View {
                 Button("Log Out", role: .destructive, action: onLogout)
             } header: {
                 Text("Account")
+            }
+
+            Section {
+                Button {
+                    serverDraft = profile?.jellyseerr?.baseUrl ?? ""
+                    editingServer = true
+                } label: {
+                    LabeledContent(
+                        "Jellyseerr server",
+                        value: profile?.jellyseerr?.baseUrl
+                            .replacingOccurrences(of: "https://", with: "")
+                            .replacingOccurrences(of: "http://", with: "") ?? "Not set"
+                    )
+                }
+                if let link = profile?.jellyseerr {
+                    Button {
+                        password = ""
+                        signInFailed = false
+                        signingIn = true
+                    } label: {
+                        LabeledContent("Account", value: link.isSignedIn ? "Signed in" : "Sign in")
+                    }
+                    NavigationLink("Browse and request") {
+                        RequestsView(seerr: seerr)
+                    }
+                }
+            } header: {
+                Text("Requests")
+            } footer: {
+                Text(
+                    "Requests are made with this profile's own Jellyfin account, so "
+                    + "quotas and history stay yours. Only the session is kept — never "
+                    + "the password."
+                )
             }
 
             if !libraries.isEmpty {
@@ -177,6 +237,32 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
+        .alert("Jellyseerr server", isPresented: $editingServer) {
+            TextField("seerr.example.com", text: $serverDraft)
+            Button("Save") {
+                if let profile { onProfileChange(profile.withJellyseerrServer(url: serverDraft)) }
+            }
+            // Clearing the field is how a profile stops using Jellyseerr
+            if profile?.jellyseerr != nil {
+                Button("Remove", role: .destructive) {
+                    if let profile { onProfileChange(profile.withJellyseerrServer(url: nil)) }
+                }
+            }
+            Button("Cancel", role: .cancel) { }
+        }
+        .alert("Sign in to Jellyseerr", isPresented: $signingIn) {
+            // Only the password is asked for: the username is the profile's
+            // own, and the password goes to the network and nowhere else
+            SecureField("Jellyfin password", text: $password)
+            Button("Sign in") { Task { await signIn() } }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text(
+                signInFailed
+                    ? "Jellyseerr refused those credentials."
+                    : "\(session.displayName) on \(profile?.jellyseerr?.baseUrl ?? "")"
+            )
+        }
         .task {
             // Best effort: an unreachable server just leaves the row out
             serverVersion = try? await api

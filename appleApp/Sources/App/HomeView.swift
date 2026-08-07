@@ -12,7 +12,10 @@ struct HomeView: View {
     let api: JellyfinApi
     let session: UserSession
     let settings: AppSettings
+    let seerr: JellyseerrApi
+    let profile: PersistedSession?
     let onSettingsChange: (AppSettings) -> Void
+    let onProfileChange: (PersistedSession) -> Void
     let onLogout: () -> Void
     let onSwitchProfile: () -> Void
 
@@ -107,7 +110,10 @@ struct HomeView: View {
             api: api,
             session: session,
             settings: settings,
+            seerr: seerr,
+            profile: profile,
             onChange: onSettingsChange,
+            onProfileChange: onProfileChange,
             onSwitchProfile: onSwitchProfile,
             onLogout: onLogout
         )
