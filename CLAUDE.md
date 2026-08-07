@@ -45,6 +45,12 @@ xcodebuild -project Jellystream.xcodeproj -scheme JellystreamTV -destination 'ge
 - **Keychain + builds non signés** : `SecItemAdd` échoue (errSecMissingEntitlement) sur les builds simulateur `CODE_SIGNING_ALLOWED=NO` → `SessionStore` retombe sur UserDefaults dans ce cas. Sur appareil signé, c'est bien le Keychain qui est utilisé. Corollaire utile en E2E : on peut pré-injecter une session (`simctl spawn <udid> defaults write dev.jellystream.tv dev.jellystream.session -string '<json PersistedSession>'`) pour sauter l'écran de login.
 - **Simulateur tvOS : Échap ≠ Menu** (tvOS 26.5) : la touche Échap du clavier n'atteint jamais l'app (`onExitCommand` ne se déclenche pas, même hors panneau). Ne pas conclure à un bug app ; pour tester Menu, passer par Window > Show Apple TV Remote ou du matériel réel. Flèches et Entrée (select), eux, fonctionnent.
 
+## Intégration continue
+
+`.github/workflows/ci.yml` rejoue à chaque push et chaque PR ce qu'on faisait à la main : tests partagés + APK Android sur Linux, puis XCFramework → iOS → tvOS sur macOS (dans cet ordre, sinon on teste un framework périmé). Environ 4 min côté Linux, 7 min côté macOS.
+
+Gratuit tant que le dépôt est **public** (minutes illimitées, runner macOS compris). S'il passait en privé : quota de 2 000 min/mois et **une minute macOS en coûte 10** → il faudrait réserver le job Apple à `main` ou au déclenchement manuel.
+
 ## Déploiement
 
 Aucun pour l'instant (pas de store, pas de CI). Merge sur `main` uniquement via PR approuvée par Matthieu.
