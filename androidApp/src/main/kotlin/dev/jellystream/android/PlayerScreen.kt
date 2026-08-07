@@ -14,8 +14,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
@@ -57,6 +60,10 @@ import androidx.media3.common.Tracks
 import androidx.media3.ui.SubtitleView
 import dev.jellystream.shared.LanguageCode
 import dev.jellystream.shared.MediaStream
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.sp
+import dev.jellystream.shared.CueTiming
+import dev.jellystream.shared.SubtitleCue
 import dev.jellystream.shared.BaseItem
 import dev.jellystream.shared.JellyfinApi
 import dev.jellystream.shared.MediaSegment
@@ -225,6 +232,41 @@ private fun PlayerSurface(
             }
     }
 
+    // Resync state. Session-only: a drift belongs to one badly muxed file,
+    // and carrying it into the next title would be a bug in preference's
+    // clothing.
+    var subtitleDelay by remember { mutableStateOf(0.0) }
+    var shiftedCues by remember { mutableStateOf<List<SubtitleCue>>(emptyList()) }
+    var playheadSeconds by remember { mutableStateOf(0.0) }
+
+    // Fetched once, and only when someone actually asks for a shift — at
+    // delay zero Media3 keeps rendering the track with its own styling
+    LaunchedEffect(desiredSubtitle, subtitleDelay != 0.0) {
+        val stream = desiredSubtitle
+        val sourceId = plan.mediaSourceId
+        if (subtitleDelay == 0.0 || stream?.index == null || sourceId == null) return@LaunchedEffect
+        if (shiftedCues.isEmpty()) {
+            shiftedCues = api.getSubtitleCues(item.id, sourceId, stream.index!!)
+        }
+    }
+
+    val drawsOwnSubtitles = subtitleDelay != 0.0 && shiftedCues.isNotEmpty()
+
+    // Handing the track back and forth: ours while shifted, Media3's at zero
+    LaunchedEffect(drawsOwnSubtitles) {
+        player.trackSelectionParameters = player.trackSelectionParameters
+            .buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, drawsOwnSubtitles)
+            .build()
+    }
+
+    LaunchedEffect(drawsOwnSubtitles) {
+        while (drawsOwnSubtitles) {
+            playheadSeconds = player.currentPosition / 1000.0 + positionOffsetSeconds
+            delay(100)
+        }
+    }
+
     // Reports must be in media time: a resumed transcode's player clock is
     // window-relative, so the raw position would rewind the resume point
     fun mediaPositionTicks(): Long =
@@ -289,6 +331,33 @@ private fun PlayerSurface(
                 }
             },
         )
+
+        // Our own cue layer, above the video and below the controls. Only
+        // ever drawn while a shift is in effect.
+        if (drawsOwnSubtitles) {
+            ShiftedSubtitles(
+                cues = shiftedCues,
+                positionSeconds = playheadSeconds,
+                delaySeconds = subtitleDelay,
+                scale = subtitleScale,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 72.dp),
+            )
+        }
+
+        // Offered only when a subtitle track is actually on — there is
+        // nothing to resync otherwise
+        if (desiredSubtitle != null && plan.mediaSourceId != null) {
+            SubtitleSyncControl(
+                delaySeconds = subtitleDelay,
+                onNudge = { subtitleDelay = (subtitleDelay + it).coerceIn(-30.0, 30.0) },
+                onReset = { subtitleDelay = 0.0 },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(12.dp),
+            )
+        }
 
         // Retains the last segment so the label survives the exit animation
         var shownSegment by remember { mutableStateOf<MediaSegment?>(null) }
@@ -407,6 +476,116 @@ private fun applySubtitleDefault(
         .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, trackIndex))
         .build()
     return true
+}
+
+/** One step of the resync control, in seconds. */
+private const val SUBTITLE_DELAY_STEP = 0.25
+
+/**
+ * Nudges subtitle timing when a file's subtitles drift against its audio.
+ *
+ * Three plain buttons rather than a slider: a remote has no thumb to drag,
+ * and the value only ever moves in quarter-second steps anyway.
+ */
+@Composable
+private fun SubtitleSyncControl(
+    delaySeconds: Double,
+    onNudge: (Double) -> Unit,
+    onReset: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color.Black.copy(alpha = 0.55f))
+            .padding(horizontal = 6.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        SyncButton("−") { onNudge(-SUBTITLE_DELAY_STEP) }
+        Text(
+            // Says which way it moved: "-0.75s" alone tells nobody whether
+            // that is earlier or later
+            when {
+                delaySeconds == 0.0 -> "Subtitles in sync"
+                delaySeconds > 0 -> "Subtitles %.2fs later".format(delaySeconds)
+                else -> "Subtitles %.2fs earlier".format(-delaySeconds)
+            },
+            color = Color.White,
+            style = MaterialTheme.typography.labelLarge,
+            textAlign = TextAlign.Center,
+            // Fixed width: the label grows as the value changes, and a
+            // reflow moves the buttons out from under the finger you are
+            // tapping with — every second press lands on nothing
+            modifier = Modifier.widthIn(min = 220.dp).padding(horizontal = 6.dp),
+        )
+        SyncButton("+") { onNudge(SUBTITLE_DELAY_STEP) }
+        // Also fixed: an appearing Reset would shove the row sideways
+        Box(modifier = Modifier.widthIn(min = 84.dp), contentAlignment = Alignment.Center) {
+            if (delaySeconds != 0.0) SyncButton("Reset", onClick = onReset)
+        }
+    }
+}
+
+@Composable
+private fun SyncButton(label: String, onClick: () -> Unit) {
+    Text(
+        label,
+        color = Color.White,
+        style = MaterialTheme.typography.labelLarge,
+        modifier = Modifier
+            .dpadFocusEffect(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(14.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+    )
+}
+
+/**
+ * Subtitle resync on Android, which Media3 cannot do on its own.
+ *
+ * `TextRenderer` hands a cue over at the moment it starts, so a cue can be
+ * held back but never brought forward — and "the subtitles are ahead of the
+ * audio" is half the cases. Owning the cue list is the only way to have
+ * both directions, so a non-zero delay switches that track off in the
+ * player and draws it here instead, from the same track fetched as WebVTT.
+ *
+ * At delay zero this composable does nothing at all: Media3 renders as it
+ * always did, keeping its own styling. The trade is made only by someone
+ * who has actively asked for it.
+ */
+@Composable
+private fun ShiftedSubtitles(
+    cues: List<SubtitleCue>,
+    positionSeconds: Double,
+    delaySeconds: Double,
+    scale: Double,
+    modifier: Modifier = Modifier,
+) {
+    val active = remember(cues, positionSeconds, delaySeconds) {
+        CueTiming.activeCues(cues, positionSeconds, delaySeconds)
+    }
+    if (active.isEmpty()) return
+    Column(
+        modifier = modifier.padding(horizontal = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        active.forEach { cue ->
+            Text(
+                cue.text,
+                color = Color.White,
+                textAlign = TextAlign.Center,
+                // Matches Media3's own look closely enough that toggling
+                // the resync does not read as a different app
+                fontSize = (18 * scale).sp,
+                lineHeight = (24 * scale).sp,
+                modifier = Modifier
+                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+            )
+        }
+    }
 }
 
 private fun subtitleMimeType(codec: String?): String? = when (codec?.lowercase()) {

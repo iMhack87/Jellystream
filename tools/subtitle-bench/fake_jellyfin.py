@@ -152,6 +152,24 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(dto(BY_ID[m.group(1)]))
         if path.startswith("/MediaSegments/"):
             return self._json({"Items": [], "TotalRecordCount": 0})
+        # One track as WebVTT — what a player asks for when it needs to
+        # own the cue list (Android cannot shift Media3's own timing)
+        m = re.match(r"^/Videos/([^/]+)/[^/]+/Subtitles/(\d+)/0/Stream\.vtt$", path)
+        if m:
+            item = BY_ID.get(m.group(1))
+            if item:
+                # Stream index 2 is the first subtitle, 3 the second
+                which = int(m.group(2)) - 2
+                if 0 <= which < len(item["subs"]):
+                    lang, forced = item["subs"][which]
+                    name = ("forced_en" if (forced and lang == "eng") else
+                            "forced_fr" if forced else "full_fr")
+                    return self._vtt(os.path.join(HERE, name + ".srt"))
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
         m = re.match(r"^/Videos/([^/]+)/stream$", path)
         if m:
             item = BY_ID.get(m.group(1))
@@ -161,6 +179,17 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(404)
         self.send_header("Content-Length", "0")
         self.end_headers()
+
+    def _vtt(self, srt_path):
+        """SRT on disk, WebVTT on the wire — the conversion a server does."""
+        with open(srt_path, encoding="utf-8") as handle:
+            body = handle.read().replace(",", ".")
+        payload = ("WEBVTT\n\n" + body).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/vtt; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
 
     def _serve(self, filepath):
         size = os.path.getsize(filepath)

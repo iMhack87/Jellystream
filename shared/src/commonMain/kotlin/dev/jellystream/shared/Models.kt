@@ -303,6 +303,9 @@ data class PlaybackPlan(
 
     /** Language of the audio that will play, which decides the default. */
     val audioLanguage: String? = null,
+
+    /** Needed to ask the server for one subtitle track on its own. */
+    val mediaSourceId: String? = null,
 )
 
 @Serializable
