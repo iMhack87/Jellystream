@@ -38,6 +38,14 @@ final class AppModel: ObservableObject {
     /// Rebuilt on profile switch: Jellyfin ties sessions to DeviceId and
     /// every profile carries its own.
     @Published private(set) var api: JellyfinApi
+
+    /// The active profile as stored, which is where the Jellyseerr link
+    /// lives — a session cookie belongs with the credentials, not with the
+    /// settings blob.
+    @Published private(set) var activeProfile: PersistedSession?
+
+    /// Shared across screens so signing in once is enough.
+    let seerr = JellyseerrApi()
     private var deviceId: String
     /// Every profile's settings, including the inactive ones.
     private var storedSettings: PersistedSettings = SettingsStore.load()
@@ -53,6 +61,11 @@ final class AppModel: ObservableObject {
             api.restoreSession(restored: only.session)
             session = only.session
             settings = storedSettings.forProfile(profileKey: only.profileKey)
+            activeProfile = only
+            seerr.configure(
+                serverUrl: only.jellyseerr?.baseUrl,
+                sessionCookie: only.jellyseerr?.sessionCookie
+            )
         } else {
             deviceId = UUID().uuidString
             api = Self.makeApi(deviceId: deviceId)
@@ -110,6 +123,23 @@ final class AppModel: ObservableObject {
         wireApi()
         session = profile.session
         settings = storedSettings.forProfile(profileKey: profile.profileKey)
+        activeProfile = profile
+        seerr.configure(
+            serverUrl: profile.jellyseerr?.baseUrl,
+            sessionCookie: profile.jellyseerr?.sessionCookie
+        )
+    }
+
+    /// Persists a change to the stored profile — today, its Jellyseerr link.
+    func update(profile updated: PersistedSession) {
+        activeProfile = updated
+        let merged = PersistedProfiles(profiles: profiles).withProfile(profile: updated)
+        profiles = merged.profiles
+        SessionStore.saveProfiles(merged)
+        seerr.configure(
+            serverUrl: updated.jellyseerr?.baseUrl,
+            sessionCookie: updated.jellyseerr?.sessionCookie
+        )
     }
 
     /// Persists a settings change for the active profile.
@@ -156,10 +186,13 @@ final class AppModel: ObservableObject {
     }
 
     private func adopt(session: UserSession) {
-        let profile = PersistedSession(deviceId: deviceId, session: session)
+        // Kotlin default arguments do not cross the bridge, so a new
+        // profile has to say out loud that it has no Jellyseerr yet
+        let profile = PersistedSession(deviceId: deviceId, session: session, jellyseerr: nil)
         let updated = PersistedProfiles(profiles: profiles).withProfile(profile: profile)
         profiles = updated.profiles
         SessionStore.saveProfiles(updated)
+        activeProfile = profile
         self.session = session
         // Signing back into a known account restores its preferences
         settings = storedSettings.forProfile(profileKey: profile.profileKey)
@@ -324,7 +357,10 @@ struct RootView: View {
                 api: model.api,
                 session: session,
                 settings: model.settings,
+                seerr: model.seerr,
+                profile: model.activeProfile,
                 onSettingsChange: { model.update(settings: $0) },
+                onProfileChange: { model.update(profile: $0) },
                 onLogout: { model.logout() },
                 onSwitchProfile: { model.switchProfile() }
             )
