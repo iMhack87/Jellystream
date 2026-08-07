@@ -74,6 +74,7 @@ class JellyfinApi(
      * Best-effort server-side revocation, then drops the local session.
      * Network failure is swallowed: the local state must clear regardless.
      */
+    @Throws(Throwable::class)
     suspend fun logout() {
         val s = session
         session = null
@@ -93,6 +94,7 @@ class JellyfinApi(
         session?.let { authorizationHeader(it.accessToken) }
 
     /** Unauthenticated ping — validates the URL points at a Jellyfin server. */
+    @Throws(Throwable::class)
     suspend fun getPublicSystemInfo(serverUrl: String): PublicSystemInfo =
         http.get("${normalizeServerUrl(serverUrl)}/System/Info/Public").body()
 
@@ -101,6 +103,7 @@ class JellyfinApi(
      * Scheme-less input is tried as https first, then http — self-hosted
      * Jellyfin servers on the LAN are frequently plain http.
      */
+    @Throws(Throwable::class)
     suspend fun resolveServer(rawUrl: String): ResolvedServer {
         var lastError: Exception? = null
         for (candidate in candidateUrls(rawUrl)) {
@@ -115,6 +118,7 @@ class JellyfinApi(
         throw lastError ?: IllegalArgumentException("No server URL candidates for '$rawUrl'")
     }
 
+    @Throws(Throwable::class)
     suspend fun authenticateByName(
         serverUrl: String,
         username: String,
@@ -130,6 +134,7 @@ class JellyfinApi(
      * Resolves the server, authenticates, and stores the session used by all
      * subsequent authenticated calls (views, latest items, images).
      */
+    @Throws(Throwable::class)
     suspend fun login(rawUrl: String, username: String, password: String): UserSession {
         val server = resolveServer(rawUrl)
         val auth = authenticateByName(server.baseUrl, username, password)
@@ -151,6 +156,7 @@ class JellyfinApi(
      * or the web UI, and the session lands here — no on-screen keyboard.
      * Returns the initial state (code to display + secret to poll with).
      */
+    @Throws(Throwable::class)
     suspend fun initiateQuickConnect(rawUrl: String): Pair<String, QuickConnectState> {
         val server = resolveServer(rawUrl)
         val state: QuickConnectState = http.post("${server.baseUrl}/QuickConnect/Initiate") {
@@ -159,6 +165,7 @@ class JellyfinApi(
         return server.baseUrl to state
     }
 
+    @Throws(Throwable::class)
     suspend fun getQuickConnectState(baseUrl: String, secret: String): QuickConnectState =
         try {
             http.get("$baseUrl/QuickConnect/Connect") {
@@ -175,6 +182,7 @@ class JellyfinApi(
         }
 
     /** Exchanges an approved Quick Connect secret for a real session. */
+    @Throws(Throwable::class)
     suspend fun authenticateWithQuickConnect(baseUrl: String, secret: String): UserSession {
         val auth: AuthenticationResult =
             http.post("$baseUrl/Users/AuthenticateWithQuickConnect") {
@@ -197,6 +205,7 @@ class JellyfinApi(
     }
 
     /** The user's library views (Movies, Shows, …). Requires [login]. */
+    @Throws(Throwable::class)
     suspend fun getUserViews(): List<BaseItem> {
         val s = requireSession()
         val result: ItemsResult = http.get("${s.baseUrl}/UserViews") {
@@ -207,6 +216,7 @@ class JellyfinApi(
     }
 
     /** Latest additions in one view (or across the library if [viewId] is null). */
+    @Throws(Throwable::class)
     suspend fun getLatestItems(viewId: String?, limit: Int = 16): List<BaseItem> {
         val s = requireSession()
         return http.get("${s.baseUrl}/Users/${s.userId}/Items/Latest") {
@@ -217,6 +227,7 @@ class JellyfinApi(
     }
 
     /** In-progress items — the "Continue watching" row. */
+    @Throws(Throwable::class)
     suspend fun getResumeItems(limit: Int = 12): List<BaseItem> {
         val s = requireSession()
         return authGet<ItemsResult>(
@@ -227,6 +238,7 @@ class JellyfinApi(
     }
 
     /** Next unwatched episodes of followed shows — the "Next up" row. */
+    @Throws(Throwable::class)
     suspend fun getNextUp(limit: Int = 12): List<BaseItem> {
         val s = requireSession()
         return authGet<ItemsResult>(
@@ -237,11 +249,13 @@ class JellyfinApi(
     }
 
     /** Full item details (overview, runtime, genres, …). */
+    @Throws(Throwable::class)
     suspend fun getItem(itemId: String): BaseItem {
         val s = requireSession()
         return authGet("Users/${s.userId}/Items/$itemId")
     }
 
+    @Throws(Throwable::class)
     suspend fun getSeasons(seriesId: String): List<BaseItem> {
         val s = requireSession()
         return authGet<ItemsResult>(
@@ -251,6 +265,7 @@ class JellyfinApi(
     }
 
     /** Episodes of a series, optionally restricted to one season. */
+    @Throws(Throwable::class)
     suspend fun getEpisodes(seriesId: String, seasonId: String?): List<BaseItem> {
         val s = requireSession()
         val params = mutableListOf(
@@ -266,6 +281,7 @@ class JellyfinApi(
         ).items
     }
 
+    @Throws(Throwable::class)
     suspend fun search(query: String, limit: Int = 24): List<BaseItem> {
         val s = requireSession()
         return authGet<ItemsResult>(
@@ -284,6 +300,7 @@ class JellyfinApi(
      * and on any failure: segments are progressive enhancement, they must
      * never break playback.
      */
+    @Throws(Throwable::class)
     suspend fun getMediaSegments(itemId: String): List<MediaSegment> =
         try {
             authGet<MediaSegmentsResult>("MediaSegments/$itemId").items
@@ -321,6 +338,7 @@ class JellyfinApi(
      * profile allows it, otherwise the server's HLS transcode; also surfaces
      * external text subtitles the player must side-load.
      */
+    @Throws(Throwable::class)
     suspend fun getPlaybackPlan(item: BaseItem, forceTranscode: Boolean = false): PlaybackPlan {
         val s = requireSession()
         val fallback = PlaybackPlan(
@@ -373,6 +391,7 @@ class JellyfinApi(
                 subtitleStreams = subtitleStreams,
                 audioLanguage = audioLanguage,
                 mediaSourceId = source.id,
+                container = source.container,
             )
         } else {
             val mediaSourceParam = source.id?.let { "&mediaSourceId=$it" } ?: ""
@@ -384,6 +403,7 @@ class JellyfinApi(
                 subtitleStreams = subtitleStreams,
                 audioLanguage = audioLanguage,
                 mediaSourceId = source.id,
+                container = source.container,
             )
         }
     }
@@ -399,6 +419,7 @@ class JellyfinApi(
      * Never throws — a track that will not download costs the resync, not
      * the film.
      */
+    @Throws(Throwable::class)
     suspend fun getSubtitleCues(
         itemId: String,
         mediaSourceId: String,
@@ -417,6 +438,45 @@ class JellyfinApi(
         } catch (e: Exception) {
             emptyList()
         }
+    }
+
+    /**
+     * Whether this account may download original files.
+     *
+     * Null when the server would not say — the caller treats that as
+     * allowed, since the download itself either works or comes back 401,
+     * whereas a hidden button on a permissive server has no way back.
+     */
+    @Throws(Throwable::class)
+    suspend fun canDownload(): Boolean? {
+        val s = session ?: return null
+        return try {
+            val user: UserDto = authGet("Users/${s.userId}")
+            user.policy?.enableContentDownloading
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * The original file, untouched — the same bytes Direct Play streams.
+     * Null without a session.
+     */
+    fun downloadUrl(itemId: String): String? {
+        val s = session ?: return null
+        return "${s.baseUrl}/Items/$itemId/Download"
+    }
+
+    /** Container of the file that would be downloaded, for its extension. */
+    @Throws(Throwable::class)
+    suspend fun containerOf(item: BaseItem): String? = try {
+        getPlaybackPlan(item, forceTranscode = false).container
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        null
     }
 
     private fun joinUrl(baseUrl: String, path: String): String =
@@ -514,6 +574,7 @@ class JellyfinApi(
     }
 
     /** Tells the server playback started — enables "continue watching". */
+    @Throws(Throwable::class)
     suspend fun reportPlaybackStart(itemId: String, playSessionId: String? = null) =
         postPlaybackReport(
             "Sessions/Playing",
@@ -521,6 +582,7 @@ class JellyfinApi(
         )
 
     /** Periodic position update (Jellyfin ticks: 1 s = 10_000_000). */
+    @Throws(Throwable::class)
     suspend fun reportPlaybackProgress(
         itemId: String,
         positionTicks: Long,
@@ -535,6 +597,7 @@ class JellyfinApi(
      * Final position — the server stores it as the resume point, and uses
      * PlaySessionId to terminate any transcode job still running for it.
      */
+    @Throws(Throwable::class)
     suspend fun reportPlaybackStopped(
         itemId: String,
         positionTicks: Long,

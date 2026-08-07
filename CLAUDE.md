@@ -26,6 +26,7 @@ xcodebuild -project Jellystream.xcodeproj -scheme JellystreamTV -destination 'ge
 
 - **Le XCFramework n'est PAS rebuildé par Xcode** : tout changement dans `shared/` exige de relancer `:shared:assembleSharedDebugXCFramework` avant le build Apple, sinon on teste du code périmé.
 - `appleApp/Jellystream.xcodeproj` est **généré** (gitignoré) : toute modif de projet passe par `appleApp/project.yml` + `xcodegen generate`, jamais par Xcode directement.
+- **Toute fonction `suspend` exposée à Swift doit porter `@Throws(Throwable::class)`.** Sans elle, une exception ne remonte pas comme erreur Swift : Kotlin/Native **termine le processus**. Symptôme : l'app Apple meurt au lancement dès que le serveur est injoignable, sans qu'aucun `try?` côté Swift ne serve à rien.
 - Les arguments par défaut Kotlin ne sont pas exportés vers Swift : toute API du module `shared` appelée depuis Swift doit être invocable avec tous ses paramètres explicites. **Corollaire qui mord** : ajouter un champ avec valeur par défaut à une data class partagée (ex. `PersistedSession.jellyseerr`) casse tous les appels Swift existants, qui l'omettaient légitimement.
 - Logique protocole Jellyfin (auth, headers `MediaBrowser`, décision Direct Play) : toujours dans `shared/`, jamais dans le code plateforme.
 
@@ -37,7 +38,7 @@ xcodebuild -project Jellystream.xcodeproj -scheme JellystreamTV -destination 'ge
   cd tools/subtitle-bench && ./make_fixtures.sh && python3 fake_jellyfin.py 8097
   cd tools/jellyseerr-bench && python3 fake_jellyseerr.py 5055   # mot de passe : bench
   ```
-  Émulateur Android → `10.0.2.2:<port>` ; simulateurs Apple → `localhost:<port>`. Vérifier avec `lsof -nP -iTCP:<port> -sTCP:LISTEN` qu'un banc d'une session précédente ne squatte pas le port.
+  Émulateur Android → `10.0.2.2:<port>` ; simulateurs Apple → `localhost:<port>`. **Tester hors ligne** : côté Android `adb shell settings put global airplane_mode_on 1` + broadcast ; côté Apple, tuer le banc (`pkill -f fake_jellyfin.py`) — c'est là qu'on trouve les vrais bugs. Vérifier avec `lsof -nP -iTCP:<port> -sTCP:LISTEN` qu'un banc d'une session précédente ne squatte pas le port.
 - **Saisie clavier dans un simulateur Apple : ne pas compter dessus.** Sur iOS l'injection `type` sort du charabia même après avoir forcé QWERTY (`defaults write .GlobalPreferences AppleKeyboards`) ; sur tvOS le clavier de recherche ne valide aucune touche, ni au clavier ni à la souris. Préférer la **pré-injection d'état** (session, réglages, cookie) dans le plist du conteneur.
 - **Émulateur Android** : les taps par coordonnées cassent dès que le clavier s'ouvre (le layout remonte, `safeDrawingPadding` inclut l'IME). Fiable : tap sur le 1er champ, puis `input keyevent 61` (TAB) pour passer au champ suivant, `KEYCODE_BACK` pour fermer le clavier avant de taper un bouton. L'autocorrect peut réécrire le texte ("demo"→"demon ") : toujours vérifier par capture avant de valider.
 

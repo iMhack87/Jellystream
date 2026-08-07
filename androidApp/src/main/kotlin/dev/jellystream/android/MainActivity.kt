@@ -76,6 +76,8 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import dev.jellystream.shared.AppSettings
 import dev.jellystream.shared.BaseItem
+import dev.jellystream.shared.DownloadAvailability
+import dev.jellystream.shared.DownloadedItem
 import dev.jellystream.shared.JellyfinApi
 import dev.jellystream.shared.JellyseerrApi
 import dev.jellystream.shared.PersistedProfiles
@@ -110,6 +112,7 @@ private sealed interface Screen {
     data object Search : Screen
     data object Settings : Screen
     data object Requests : Screen
+    data object Downloads : Screen
 }
 
 /** App-private storage for the profiles blob (shared module owns the format). */
@@ -235,6 +238,16 @@ private fun SignedInApp(
             deviceId = profile.deviceId,
         ).also { it.restoreSession(profile.session) }
     }
+    val context = LocalContext.current
+    val downloadStore = remember { DownloadStore(context, profile.profileKey) }
+    var downloads by remember { mutableStateOf(downloadStore.load()) }
+    val downloader = remember {
+        Downloader(context, api, profile.profileKey, downloadStore)
+    }
+    // Can this account download at all? demo.jellyfin.org says no.
+    var downloadingAllowed by remember { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(profile.profileKey) { downloadingAllowed = api.canDownload() }
+
     val seerr = remember { JellyseerrApi() }
     // Re-read on every change: pointing at another server or signing in
     // must take effect without restarting the app
@@ -242,6 +255,7 @@ private fun SignedInApp(
         seerr.configure(profile.jellyseerr?.baseUrl, profile.jellyseerr?.sessionCookie)
     }
     var playing by remember { mutableStateOf<BaseItem?>(null) }
+    var playingOffline by remember { mutableStateOf<DownloadedItem?>(null) }
     val backStack = remember { mutableStateListOf<Screen>(Screen.Home) }
     val scope = rememberCoroutineScope()
 
@@ -252,6 +266,15 @@ private fun SignedInApp(
         api.onUnauthorized = { mainHandler.post(onLoggedOut) }
         onDispose { api.onUnauthorized = null }
     }
+
+    // The downloader runs off the main thread; its updates land here
+    DisposableEffect(downloader) {
+        downloader.onChange = { updated -> mainHandler.post { downloads = updated } }
+        onDispose { downloader.onChange = null }
+    }
+    // Whatever was watched offline goes back to the server on the way in
+    LaunchedEffect(Unit) { downloader.syncPositions() }
+
 
     fun open(item: BaseItem) {
         when {
@@ -283,12 +306,21 @@ private fun SignedInApp(
                     onSearch = { backStack.add(Screen.Search) },
                     onSettings = { backStack.add(Screen.Settings) },
                     onLogout = ::logout,
+                    downloadCount = downloads.playable.size,
+                    onOpenDownloads = { backStack.add(Screen.Downloads) },
                 )
                 is Screen.Detail -> DetailScreen(
                     api,
                     screen.item,
                     onPlay = { playing = it },
                     onBack = ::goBack,
+                    download = DownloadAvailability.of(screen.item, downloadingAllowed),
+                    downloadState = downloads.stateOf(screen.item.id),
+                    onDownload = {
+                        scope.launch {
+                            downloader.start(screen.item, api.containerOf(screen.item))
+                        }
+                    },
                 )
                 is Screen.Series -> SeriesScreen(
                     api,
@@ -298,6 +330,14 @@ private fun SignedInApp(
                 )
                 Screen.Search -> SearchScreen(api, onOpen = ::open, onBack = ::goBack)
                 Screen.Requests -> RequestsScreen(seerr, onBack = ::goBack)
+                Screen.Downloads -> DownloadsScreen(
+                    downloads = downloads,
+                    onPlay = { item ->
+                        downloads[item.itemId]?.let { playingOffline = it }
+                    },
+                    onRemove = { downloader.remove(it.itemId) },
+                    onBack = ::goBack,
+                )
                 Screen.Settings -> SettingsScreen(
                     api = api,
                     seerr = seerr,
@@ -307,6 +347,7 @@ private fun SignedInApp(
                     onChange = onSettingsChange,
                     onProfileChange = onProfileChange,
                     onOpenRequests = { backStack.add(Screen.Requests) },
+                    onOpenDownloads = { backStack.add(Screen.Downloads) },
                     onSwitchProfile = onSwitchProfile,
                     onLogout = ::logout,
                     onBack = ::goBack,
@@ -315,6 +356,23 @@ private fun SignedInApp(
 
             BackHandler(enabled = backStack.size > 1 && playing == null) {
                 backStack.removeAt(backStack.lastIndex)
+            }
+
+            // Offline playback is its own overlay: no plan, no reports
+            playingOffline?.let { offline ->
+                PlayerScreen@ Box(modifier = Modifier.fillMaxSize()) {
+                    OfflinePlayerScreen(
+                        file = downloadedFile(context, profile.profileKey, offline),
+                        item = offline,
+                        onPosition = { ticks ->
+                            downloads = downloadStore.load()
+                                .markPosition(offline.itemId, ticks)
+                                .also(downloadStore::save)
+                            downloader.syncPositions()
+                        },
+                        onClose = { playingOffline = null },
+                    )
+                }
             }
 
             playing?.let { item ->
@@ -642,6 +700,8 @@ private fun HomeScreen(
     onSearch: () -> Unit,
     onSettings: () -> Unit,
     onLogout: () -> Unit,
+    downloadCount: Int = 0,
+    onOpenDownloads: () -> Unit = {},
 ) {
     var sections by remember { mutableStateOf<List<LibrarySection>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -676,13 +736,38 @@ private fun HomeScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text(error!!, color = MaterialTheme.colorScheme.error)
-            // Never strand the user on a dead server: offer a way out
-            Button(
-                onClick = onLogout,
-                modifier = Modifier.dpadFocusEffect(RoundedCornerShape(10.dp)),
-            ) {
-                Text("Log out")
+            // Downloads exist precisely for this moment. Offering only
+            // "Log out" here would send someone on a train to the one
+            // button that deletes the films they downloaded for it.
+            if (downloadCount > 0) {
+                Text(
+                    "Can't reach the server.",
+                    color = CinemaColors.TextPrimary,
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    "$downloadCount downloaded ${if (downloadCount == 1) "title is" else "titles are"} still on this device.",
+                    color = CinemaColors.TextSecondary,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Button(
+                    onClick = onOpenDownloads,
+                    modifier = Modifier
+                        .tvDefaultFocus()
+                        .dpadFocusEffect(RoundedCornerShape(10.dp)),
+                ) {
+                    Text("Go to downloads")
+                }
+                TextButton(onClick = onLogout) { Text("Log out") }
+            } else {
+                Text(error!!, color = MaterialTheme.colorScheme.error)
+                // Never strand the user on a dead server: offer a way out
+                Button(
+                    onClick = onLogout,
+                    modifier = Modifier.dpadFocusEffect(RoundedCornerShape(10.dp)),
+                ) {
+                    Text("Log out")
+                }
             }
         }
         sections == null -> Column(

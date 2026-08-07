@@ -81,12 +81,18 @@ fun JellystreamTheme(content: @Composable () -> Unit) {
 }
 
 /**
- * tvOS-style D-pad focus: scale + white ring when focused. Inert on touch
- * devices (nothing gains keyboard focus there), so one code path serves
- * both phone and Android TV. `composed` keeps the state local to the
- * modifier so focus changes don't recompose the whole item; zIndex lifts
- * the focused card above its later-drawn siblings.
+ * True on Android TV. Offline downloads are a phone and tablet feature: a
+ * television sits on the same network as the server and has nowhere to put
+ * forty gigabytes.
  */
+@Composable
+fun isTvDevice(): Boolean {
+    val context = LocalContext.current
+    return remember {
+        context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+    }
+}
+
 /**
  * Grabs initial D-pad focus on TV so the screen's primary CTA is one
  * center-press away (the ATV+ pattern) — without it, initial focus lands

@@ -13,9 +13,16 @@ data class PublicSystemInfo(
 )
 
 @Serializable
+data class UserPolicy(
+    /** Jellyfin lets an admin forbid downloading per account. */
+    @SerialName("EnableContentDownloading") val enableContentDownloading: Boolean? = null,
+)
+
+@Serializable
 data class UserDto(
     @SerialName("Id") val id: String? = null,
     @SerialName("Name") val name: String? = null,
+    @SerialName("Policy") val policy: UserPolicy? = null,
 )
 
 @Serializable
@@ -340,6 +347,9 @@ data class PlaybackPlan(
 
     /** Needed to ask the server for one subtitle track on its own. */
     val mediaSourceId: String? = null,
+
+    /** Container of the source file, which names a downloaded copy. */
+    val container: String? = null,
 )
 
 @Serializable

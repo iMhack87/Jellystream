@@ -6,6 +6,8 @@ struct DetailView: View {
     @State private var item: BaseItem
     @State private var playingItem: BaseItem?
     @Environment(\.appSettings) private var appSettings
+    @Environment(\.downloader) private var downloader
+    @Environment(\.downloadingAllowed) private var downloadingAllowed
 
     init(api: JellyfinApi, item: BaseItem) {
         self.api = api
@@ -85,6 +87,22 @@ struct DetailView: View {
                     .buttonStyle(.plain)
                     #endif
 
+                    // Offline is a phone and tablet feature: a television
+                    // sits on the same network as the server
+                    #if !os(tvOS)
+                    if let downloader {
+                        // Its own view so the label follows the download:
+                        // @Environment hands over the object but does not
+                        // observe it, so the row stayed on "Download"
+                        DownloadControl(
+                            downloader: downloader,
+                            api: api,
+                            item: item,
+                            allowed: downloadingAllowed
+                        )
+                    }
+                    #endif
+
                     if let overview = item.overview {
                         Text(overview)
                             .font(.body)
@@ -124,3 +142,48 @@ struct DetailView: View {
         return parts.joined(separator: "  ·  ")
     }
 }
+
+#if !os(tvOS)
+/// The Download button, and what it becomes once a download exists.
+private struct DownloadControl: View {
+    @ObservedObject var downloader: Downloader
+    let api: JellyfinApi
+    let item: BaseItem
+    let allowed: Bool?
+
+    var body: some View {
+        if let existing = downloader.downloads.get(itemId: item.id) {
+            Text(Self.label(existing.state))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        } else {
+            let availability = DownloadAvailability.companion.of(
+                item: item,
+                downloadingEnabled: allowed.map { KotlinBoolean(bool: $0) }
+            )
+            if availability.canDownload {
+                Button("Download") {
+                    Task {
+                        let container = try? await api.containerOf(item: item)
+                        downloader.start(item: item, container: container)
+                    }
+                }
+                .font(.subheadline)
+            } else if let explanation = availability.explanation {
+                // Say why rather than show a button that would 401
+                Text(explanation).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private static func label(_ state: DownloadState) -> String {
+        switch state {
+        case .queued: return "Queued for download"
+        case .downloading: return "Downloading…"
+        case .complete: return "Available offline"
+        case .failed: return "Download failed"
+        default: return ""
+        }
+    }
+}
+#endif

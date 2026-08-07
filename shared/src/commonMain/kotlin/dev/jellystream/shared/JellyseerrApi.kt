@@ -74,6 +74,7 @@ class JellyseerrApi {
      * Returns the session cookie to persist, or null when the server said
      * no. The password is never stored, here or by the caller.
      */
+    @Throws(Throwable::class)
     suspend fun signIn(username: String, password: String): String? {
         val base = baseUrl ?: return null
         return try {
@@ -110,6 +111,7 @@ class JellyseerrApi {
      * An unreachable server yields an empty list: a search box that goes
      * quiet is better than one that throws into the UI.
      */
+    @Throws(Throwable::class)
     suspend fun search(query: String): List<JellyseerrResult> {
         val base = baseUrl ?: return emptyList()
         if (query.isBlank()) return emptyList()
@@ -132,6 +134,7 @@ class JellyseerrApi {
      * Asks for a title. Series are requested whole — picking seasons is a
      * screen of its own, and "all of it" is what nearly everyone means.
      */
+    @Throws(Throwable::class)
     suspend fun request(tmdbId: Int, isSeries: Boolean): RequestOutcome {
         val base = baseUrl ?: return RequestOutcome.Failed("No Jellyseerr server set")
         if (cookie == null) return RequestOutcome.NotSignedIn
@@ -159,6 +162,7 @@ class JellyseerrApi {
     }
 
     /** What this account has asked for, newest first. */
+    @Throws(Throwable::class)
     suspend fun myRequests(limit: Int = 30): List<JellyseerrRequest> {
         val base = baseUrl ?: return emptyList()
         if (cookie == null) return emptyList()

@@ -90,10 +90,14 @@ fun SettingsScreen(
     onChange: (AppSettings) -> Unit,
     onProfileChange: (PersistedSession) -> Unit,
     onOpenRequests: () -> Unit,
+    onOpenDownloads: () -> Unit,
     onSwitchProfile: () -> Unit,
     onLogout: () -> Unit,
     onBack: () -> Unit,
 ) {
+    // Read once, outside the list scope: a LazyColumn's content lambda is
+    // not composable, so a composable call there does not compile
+    val onTelevision = isTvDevice()
     var editingServer by remember { mutableStateOf(false) }
     var signingIn by remember { mutableStateOf(false) }
     val link = profile.jellyseerr
@@ -181,6 +185,14 @@ fun SettingsScreen(
                                 },
                             )
                         }
+                    }
+                }
+            }
+
+            if (!onTelevision) {
+                item(key = "downloads") {
+                    SettingsSection("Offline") {
+                        SettingsAction("Downloads", onClick = onOpenDownloads)
                     }
                 }
             }

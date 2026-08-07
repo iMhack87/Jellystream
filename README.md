@@ -43,6 +43,13 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full rationale.
 
 **Subtitles.** Films start with the right track already on: **forced subtitles when you understand the audio, full subtitles when you don't**, matched across the `fr`/`fre`/`fra` spellings that different muxers write for the same language. Size is adjustable, and **timing can be nudged in both directions** when a file's subtitles drift.
 
+**Offline.** On the phone and the tablet, a film or an episode can be
+**kept on the device** — the original file, untouched, the same bytes
+Direct Play streams. With the network gone the app says so and opens what
+is still there; what you watch on the train reaches the server as a resume
+point the moment you are back. (Not on television: it sits on the same
+network as the server and has nowhere to put forty gigabytes.)
+
 **Requesting.** Point a profile at a [Jellyseerr](https://github.com/fallenbagel/jellyseerr) and you can **search for what the library does not have, ask for it, and follow what you asked for** — on the phone, the tablet and the television. Requests go through the profile's own Jellyfin account, so quotas and history stay per person; only the session is kept, never the password.
 
 See [docs/BUILDING.md](docs/BUILDING.md) to build, and `tools/` for the local

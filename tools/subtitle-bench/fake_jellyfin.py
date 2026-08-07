@@ -138,6 +138,23 @@ class Handler(BaseHTTPRequestHandler):
                 "ServerName": "Subtitle Bench", "Version": "10.11.11",
                 "ProductName": "Jellyfin Server", "Id": "bench",
             })
+        # Downloading is a per-account permission, and the public demo has
+        # it switched off — the bench says yes so the path is testable
+        m = re.match(r"^/Users/([^/]+)$", path)
+        if m:
+            return self._json({
+                "Id": USER_ID, "Name": "bench",
+                "Policy": {"EnableContentDownloading": True},
+            })
+
+        # The original file, untouched. Same bytes as the stream, but the
+        # endpoint a download uses.
+        m = re.match(r"^/Items/([^/]+)/Download$", path)
+        if m:
+            item = BY_ID.get(m.group(1))
+            if item:
+                return self._serve(os.path.join(HERE, item["file"]))
+
         if path == "/UserViews":
             return self._json({"Items": [{
                 "Id": "view-movies", "Name": "Movies",

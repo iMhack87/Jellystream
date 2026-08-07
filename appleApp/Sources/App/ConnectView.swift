@@ -46,6 +46,9 @@ final class AppModel: ObservableObject {
 
     /// Shared across screens so signing in once is enough.
     let seerr = JellyseerrApi()
+
+    /// Rebuilt per profile: downloads are per account, like settings.
+    @Published private(set) var downloader: Downloader?
     private var deviceId: String
     /// Every profile's settings, including the inactive ones.
     private var storedSettings: PersistedSettings = SettingsStore.load()
@@ -62,6 +65,7 @@ final class AppModel: ObservableObject {
             session = only.session
             settings = storedSettings.forProfile(profileKey: only.profileKey)
             activeProfile = only
+            downloader = Downloader(api: api, profileKey: only.profileKey)
             seerr.configure(
                 serverUrl: only.jellyseerr?.baseUrl,
                 sessionCookie: only.jellyseerr?.sessionCookie
@@ -124,6 +128,7 @@ final class AppModel: ObservableObject {
         session = profile.session
         settings = storedSettings.forProfile(profileKey: profile.profileKey)
         activeProfile = profile
+        downloader = Downloader(api: api, profileKey: profile.profileKey)
         seerr.configure(
             serverUrl: profile.jellyseerr?.baseUrl,
             sessionCookie: profile.jellyseerr?.sessionCookie
@@ -358,6 +363,7 @@ struct RootView: View {
                 session: session,
                 settings: model.settings,
                 seerr: model.seerr,
+                downloader: model.downloader,
                 profile: model.activeProfile,
                 onSettingsChange: { model.update(settings: $0) },
                 onProfileChange: { model.update(profile: $0) },
