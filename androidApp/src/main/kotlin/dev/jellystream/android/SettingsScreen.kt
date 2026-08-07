@@ -3,6 +3,7 @@ package dev.jellystream.android
 import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,6 +39,9 @@ import androidx.compose.ui.unit.dp
 import dev.jellystream.shared.AppSettings
 import dev.jellystream.shared.BaseItem
 import dev.jellystream.shared.JellyfinApi
+import dev.jellystream.shared.LanguageCode
+import dev.jellystream.shared.SubtitleLanguages
+import dev.jellystream.shared.SubtitleMode
 import dev.jellystream.shared.PersistedSettings
 import dev.jellystream.shared.UserSession
 
@@ -164,6 +168,41 @@ fun SettingsScreen(
                         }
                     }
                 }
+            }
+
+            item(key = "subtitles") {
+                SettingsSection("Subtitles") {
+                    SettingsChoice(
+                        label = "When to show",
+                        value = settings.subtitleMode.label,
+                        onClick = {
+                            onChange(
+                                settings.withSubtitleMode(
+                                    SubtitleMode.Companion.next(settings.subtitleMode)
+                                )
+                            )
+                        },
+                    )
+                    SettingsChoice(
+                        label = "Language",
+                        value = SubtitleLanguages.labelFor(settings.subtitleLanguage),
+                        onClick = { onChange(settings.withSubtitleLanguage(nextLanguage(settings.subtitleLanguage))) },
+                    )
+                    SettingsChoice(
+                        label = "Size",
+                        value = scaleLabel(settings.subtitleScale),
+                        onClick = { onChange(settings.withSubtitleScale(nextScale(settings.subtitleScale))) },
+                        last = true,
+                    )
+                }
+                Text(
+                    "Smart turns on full subtitles when the audio is not in your "
+                        + "language, and only forced ones when it is. Device language "
+                        + "follows the system: ${deviceLanguageLabel()}.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = CinemaColors.TextSecondary,
+                    modifier = Modifier.padding(start = 4.dp, top = 6.dp),
+                )
             }
 
             item(key = "playback") {
@@ -295,6 +334,74 @@ private fun SettingsAction(
             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         )
     }
+}
+
+/**
+ * A setting with a handful of values: the row shows the current one and a
+ * click steps to the next. No dialog, no picker — one focusable target per
+ * setting is what a D-pad wants, and a phone loses nothing by it.
+ */
+@Composable
+private fun SettingsChoice(
+    label: String,
+    value: String,
+    onClick: () -> Unit,
+    last: Boolean = false,
+) {
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .dpadFocusEffect(RoundedCornerShape(10.dp), scaleOnFocus = false)
+                .clickable { onClick() }
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                label,
+                style = MaterialTheme.typography.bodyLarge,
+                color = CinemaColors.TextPrimary,
+            )
+            Text(
+                value,
+                style = MaterialTheme.typography.bodyLarge,
+                color = CinemaColors.TextSecondary,
+            )
+        }
+        if (!last) HorizontalDivider(color = CinemaColors.SurfaceVariant)
+    }
+}
+
+/** The system's language as an ISO 639-2 code, or null if it has none. */
+internal fun deviceSubtitleLanguage(): String? =
+    runCatching { java.util.Locale.getDefault().isO3Language }
+        .getOrNull()
+        ?.takeIf { it.isNotEmpty() }
+
+private fun deviceLanguageLabel(): String =
+    SubtitleLanguages.labelFor(deviceSubtitleLanguage())
+        .takeIf { it != SubtitleLanguages.CHOICES.first().label }
+        ?: (deviceSubtitleLanguage()?.uppercase() ?: "unknown")
+
+private fun nextLanguage(current: String?): String? {
+    val choices = SubtitleLanguages.CHOICES
+    val index = choices.indexOfFirst { LanguageCode.matches(it.code, current) }
+        .takeIf { it >= 0 }
+        ?: choices.indexOfFirst { it.code == null }
+    return choices[(index + 1) % choices.size].code
+}
+
+/** The sizes worth offering; anything finer is fiddling, not a setting. */
+private val SCALES = listOf(0.75, 1.0, 1.25, 1.5, 2.0)
+
+private fun nextScale(current: Double): Double {
+    val index = SCALES.indexOfFirst { kotlin.math.abs(it - current) < 0.01 }
+    return SCALES[(index + 1).mod(SCALES.size)]
+}
+
+private fun scaleLabel(scale: Double): String = when {
+    kotlin.math.abs(scale - 1.0) < 0.01 -> "Normal"
+    else -> "${(scale * 100).toInt()}%"
 }
 
 @Composable

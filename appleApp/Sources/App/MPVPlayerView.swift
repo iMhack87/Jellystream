@@ -25,6 +25,9 @@ struct MediaTrack: Decodable, Identifiable {
 final class PlayerModel: ObservableObject {
     let api: JellyfinApi
     let item: BaseItem
+    /// The profile's preferences — the subtitle default and size come from
+    /// here, and mpv needs them the moment the file loads.
+    let settings: AppSettings
 
     @Published var timePos: Double = 0
     @Published var duration: Double = 0
@@ -47,10 +50,14 @@ final class PlayerModel: ObservableObject {
     /// Segment just skipped — suppressed until the playhead leaves it, so
     /// the button doesn't flash while mpv processes the seek.
     private var skippedSegment: MediaSegment?
+    /// The track the shared picker chose, waiting for mpv's track list.
+    private var pendingSubtitleDefault: MediaStream?
+    private var subtitleDefaultPending = false
 
-    init(api: JellyfinApi, item: BaseItem) {
+    init(api: JellyfinApi, item: BaseItem, settings: AppSettings) {
         self.api = api
         self.item = item
+        self.settings = settings
     }
 
     // Safety net if onDisappear never fires: free mpv and the timer.
@@ -115,6 +122,14 @@ final class PlayerModel: ObservableObject {
             for subtitle in plan?.externalSubtitles ?? [] {
                 self.command("sub-add", subtitle.url, "auto")
             }
+            self.applySubtitleScale(self.settings.subtitleScale)
+            // The track list only exists once demuxing has started, so the
+            // default waits for it rather than firing into an empty list
+            self.pendingSubtitleDefault = self.settings.chooseSubtitle(
+                subtitles: plan?.subtitleStreams ?? [],
+                audioLanguage: plan?.audioLanguage
+            )
+            self.subtitleDefaultPending = true
             try? await self.api.reportPlaybackStart(
                 itemId: self.item.id,
                 playSessionId: plan?.playSessionId
@@ -180,6 +195,57 @@ final class PlayerModel: ObservableObject {
         refreshTracks()
     }
 
+    /// Subtitle timing offset in seconds; positive shows them later.
+    /// Session-only on purpose — a resync belongs to one bad file, and
+    /// carrying it into the next title is a bug, not a feature.
+    @Published private(set) var subtitleDelay: Double = 0
+
+    /// One nudge of the resync control.
+    static let subtitleDelayStep: Double = 0.25
+
+    func nudgeSubtitleDelay(by seconds: Double) {
+        setSubtitleDelay(subtitleDelay + seconds)
+    }
+
+    func resetSubtitleDelay() {
+        setSubtitleDelay(0)
+    }
+
+    private func setSubtitleDelay(_ seconds: Double) {
+        // Past a few seconds it is the wrong track, not a drift
+        let clamped = min(max(seconds, -30), 30)
+        subtitleDelay = clamped
+        setDouble("sub-delay", clamped)
+    }
+
+    /// Applies the profile's size to whatever mpv renders. 1.0 is mpv's own.
+    func applySubtitleScale(_ scale: Double) {
+        setDouble("sub-scale", scale)
+    }
+
+    /**
+     Switches on the track the shared picker chose, or leaves subtitles off.
+
+     mpv numbers its own tracks, so the match is made on what both sides
+     carry: the language, and whether the track is forced. Side-loaded
+     external subtitles are in the same list by then.
+     */
+    func applySubtitleDefault(_ desired: MediaStream?) {
+        refreshTracks()
+        guard let desired else {
+            selectSubtitleTrack(id: nil)
+            return
+        }
+        let match = subtitleTracks.first { track in
+            LanguageCode.shared.matches(a: track.lang, b: desired.language)
+        }
+        // No match means the picker saw a stream mpv has not surfaced —
+        // leaving mpv's own choice alone beats forcing a wrong track
+        if let match {
+            selectSubtitleTrack(id: match.id)
+        }
+    }
+
     private func refreshTracks() {
         guard let json = getString("track-list"),
               let data = json.data(using: .utf8),
@@ -187,6 +253,14 @@ final class PlayerModel: ObservableObject {
         else { return }
         audioTracks = tracks.filter { $0.type == "audio" }
         subtitleTracks = tracks.filter { $0.type == "sub" }
+
+        // First list mpv produces for this file: apply the profile's
+        // default now, then never again — from here the track panel
+        // belongs to the viewer.
+        if subtitleDefaultPending, !tracks.isEmpty {
+            subtitleDefaultPending = false
+            applySubtitleDefault(pendingSubtitleDefault)
+        }
     }
 
     private func tick() {
@@ -257,6 +331,12 @@ final class PlayerModel: ObservableObject {
         mpv_set_property_string(handle, name, value)
     }
 
+    private func setDouble(_ name: String, _ value: Double) {
+        guard let handle = mpv else { return }
+        var raw = value
+        mpv_set_property(handle, name, MPV_FORMAT_DOUBLE, &raw)
+    }
+
     private func command(_ args: String...) {
         guard let handle = mpv else { return }
         var cStrings = args.map { UnsafePointer<CChar>(strdup($0)) }
@@ -296,8 +376,13 @@ struct PlayerScreen: View {
     @FocusState private var skipFocused: Bool
     #endif
 
-    init(api: JellyfinApi, item: BaseItem) {
-        _model = StateObject(wrappedValue: PlayerModel(api: api, item: item))
+    // Settings arrive as a parameter, not from the environment: the model
+    // is built in init, before @Environment is readable, and mpv needs the
+    // subtitle preference at loadfile time.
+    init(api: JellyfinApi, item: BaseItem, settings: AppSettings) {
+        _model = StateObject(
+            wrappedValue: PlayerModel(api: api, item: item, settings: settings)
+        )
     }
 
     var body: some View {
@@ -497,6 +582,30 @@ struct PlayerScreen: View {
                             }
                         }
                     }
+
+                    // Timing lives with the track it applies to, and only
+                    // once one is actually on
+                    if model.subtitleTracks.contains(where: \.selected) {
+                        Section("Sync \(Self.delayLabel(model.subtitleDelay))") {
+                            Button {
+                                model.nudgeSubtitleDelay(by: -PlayerModel.subtitleDelayStep)
+                            } label: {
+                                Label("Earlier", systemImage: "gobackward")
+                            }
+                            Button {
+                                model.nudgeSubtitleDelay(by: PlayerModel.subtitleDelayStep)
+                            } label: {
+                                Label("Later", systemImage: "goforward")
+                            }
+                            if model.subtitleDelay != 0 {
+                                Button {
+                                    model.resetSubtitleDelay()
+                                } label: {
+                                    Label("Reset", systemImage: "arrow.counterclockwise")
+                                }
+                            }
+                        }
+                    }
                 } label: {
                     Image(systemName: "captions.bubble")
                         .foregroundStyle(.white)
@@ -505,6 +614,13 @@ struct PlayerScreen: View {
         }
         .padding(12)
         .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    /// Says which way it moved, not just the number.
+    private static func delayLabel(_ delay: Double) -> String {
+        delay == 0
+            ? "(in sync)"
+            : String(format: "(%+.2fs %@)", delay, delay > 0 ? "later" : "earlier")
     }
 
     private static func timeString(_ seconds: Double) -> String {
@@ -555,6 +671,11 @@ private struct TrackPanel: View {
                         }
                     }
                 }
+
+                // Only worth showing once a track is actually on
+                if model.subtitleTracks.contains(where: \.selected) {
+                    SubtitleDelayRow(model: model)
+                }
             }
         }
         .padding(48)
@@ -562,6 +683,43 @@ private struct TrackPanel: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
         .padding(60)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+    }
+}
+
+/**
+ Nudges subtitle timing when a file's subtitles drift against its audio.
+
+ Session-only: a resync belongs to one bad file, and carrying it into the
+ next title would be a bug rather than a preference.
+ */
+private struct SubtitleDelayRow: View {
+    @ObservedObject var model: PlayerModel
+
+    var body: some View {
+        HStack(spacing: 16) {
+            Text("Sync").font(.headline)
+            Button("−\(Self.stepLabel)") {
+                model.nudgeSubtitleDelay(by: -PlayerModel.subtitleDelayStep)
+            }
+            Text(label)
+                .font(.headline.monospacedDigit())
+                .frame(minWidth: 120)
+            Button("+\(Self.stepLabel)") {
+                model.nudgeSubtitleDelay(by: PlayerModel.subtitleDelayStep)
+            }
+            if model.subtitleDelay != 0 {
+                Button("Reset") { model.resetSubtitleDelay() }
+            }
+        }
+    }
+
+    private static let stepLabel = String(format: "%.2fs", PlayerModel.subtitleDelayStep)
+
+    /// Says which way it moved, not just the number.
+    private var label: String {
+        let delay = model.subtitleDelay
+        if delay == 0 { return "In sync" }
+        return String(format: "%+.2fs %@", delay, delay > 0 ? "later" : "earlier")
     }
 }
 #endif

@@ -5,6 +5,7 @@ struct DetailView: View {
     let api: JellyfinApi
     @State private var item: BaseItem
     @State private var playingItem: BaseItem?
+    @Environment(\.appSettings) private var appSettings
 
     init(api: JellyfinApi, item: BaseItem) {
         self.api = api
@@ -110,7 +111,7 @@ struct DetailView: View {
             }
         }
         .fullScreenCover(item: $playingItem) { playing in
-            PlayerScreen(api: api, item: playing)
+            PlayerScreen(api: api, item: playing, settings: appSettings)
         }
     }
 

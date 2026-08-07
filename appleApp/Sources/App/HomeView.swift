@@ -34,7 +34,7 @@ struct HomeView: View {
             .environment(\.appSettings, settings)
             .preferredColorScheme(.dark)
             .fullScreenCover(item: $playingItem) { item in
-                PlayerScreen(api: api, item: item)
+                PlayerScreen(api: api, item: item, settings: settings)
             }
     }
 

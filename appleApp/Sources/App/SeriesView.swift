@@ -13,6 +13,7 @@ struct SeriesView: View {
     @State private var episodes: [BaseItem] = []
     @State private var error: String?
     @State private var playingItem: BaseItem?
+    @Environment(\.appSettings) private var appSettings
 
     #if os(tvOS)
     private let headerHeight: CGFloat = 360
@@ -58,7 +59,7 @@ struct SeriesView: View {
             episodes = (try? await api.getEpisodes(seriesId: series.id, seasonId: season.id)) ?? []
         }
         .fullScreenCover(item: $playingItem) { playing in
-            PlayerScreen(api: api, item: playing)
+            PlayerScreen(api: api, item: playing, settings: appSettings)
         }
     }
 

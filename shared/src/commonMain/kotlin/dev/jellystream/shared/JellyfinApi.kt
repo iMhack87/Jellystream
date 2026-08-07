@@ -354,6 +354,14 @@ class JellyfinApi(
                 )
             }
 
+        val subtitleStreams = source.mediaStreams.orEmpty().filter { it.isSubtitle }
+        // The audio the server will actually play: its default track, else
+        // the first one. Which language it is decides whether the smart
+        // default puts full subtitles on.
+        val audioStreams = source.mediaStreams.orEmpty().filter { it.isAudio }
+        val audioLanguage = (audioStreams.firstOrNull { it.isDefault } ?: audioStreams.firstOrNull())
+            ?.language
+
         val transcodingUrl = source.transcodingUrl
         return if ((!source.supportsDirectPlay || forceTranscode) && transcodingUrl != null) {
             PlaybackPlan(
@@ -362,6 +370,9 @@ class JellyfinApi(
                 externalSubtitles = subtitles,
                 playSessionId = info.playSessionId,
                 startOffsetSeconds = startTicks / TICKS_PER_SECOND.toDouble(),
+                subtitleStreams = subtitleStreams,
+                audioLanguage = audioLanguage,
+                mediaSourceId = source.id,
             )
         } else {
             val mediaSourceParam = source.id?.let { "&mediaSourceId=$it" } ?: ""
@@ -370,7 +381,41 @@ class JellyfinApi(
                 isTranscode = false,
                 externalSubtitles = subtitles,
                 playSessionId = info.playSessionId,
+                subtitleStreams = subtitleStreams,
+                audioLanguage = audioLanguage,
+                mediaSourceId = source.id,
             )
+        }
+    }
+
+    /**
+     * One subtitle track as WebVTT, already parsed.
+     *
+     * Jellyfin converts any text track on request, embedded ones included,
+     * which is what lets a player own the cue list. Android needs that to
+     * shift subtitle timing at all: Media3 hands a cue over at the moment
+     * it starts, so it can be held back but never brought forward.
+     *
+     * Never throws — a track that will not download costs the resync, not
+     * the film.
+     */
+    suspend fun getSubtitleCues(
+        itemId: String,
+        mediaSourceId: String,
+        streamIndex: Int,
+    ): List<SubtitleCue> {
+        val s = requireSession()
+        return try {
+            val body: String = http.get(
+                "${s.baseUrl}/Videos/$itemId/$mediaSourceId/Subtitles/$streamIndex/0/Stream.vtt"
+            ) {
+                header("Authorization", authorizationHeader(s.accessToken))
+            }.body()
+            VttParser.parse(body)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            emptyList()
         }
     }
 
