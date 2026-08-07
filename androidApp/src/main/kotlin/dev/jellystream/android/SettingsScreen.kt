@@ -17,6 +17,11 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import kotlinx.coroutines.launch
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
@@ -42,6 +47,8 @@ import dev.jellystream.shared.JellyfinApi
 import dev.jellystream.shared.LanguageCode
 import dev.jellystream.shared.SubtitleLanguages
 import dev.jellystream.shared.SubtitleMode
+import dev.jellystream.shared.JellyseerrApi
+import dev.jellystream.shared.PersistedSession
 import dev.jellystream.shared.PersistedSettings
 import dev.jellystream.shared.UserSession
 
@@ -76,13 +83,21 @@ val LocalAppSettings = compositionLocalOf { AppSettings.Defaults }
 @Composable
 fun SettingsScreen(
     api: JellyfinApi,
+    seerr: JellyseerrApi,
+    profile: PersistedSession,
     session: UserSession,
     settings: AppSettings,
     onChange: (AppSettings) -> Unit,
+    onProfileChange: (PersistedSession) -> Unit,
+    onOpenRequests: () -> Unit,
     onSwitchProfile: () -> Unit,
     onLogout: () -> Unit,
     onBack: () -> Unit,
 ) {
+    var editingServer by remember { mutableStateOf(false) }
+    var signingIn by remember { mutableStateOf(false) }
+    val link = profile.jellyseerr
+
     // Best effort: an unreachable server just leaves the row out
     var serverVersion by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(session.baseUrl) {
@@ -170,6 +185,36 @@ fun SettingsScreen(
                 }
             }
 
+            item(key = "requests") {
+                SettingsSection("Requests") {
+                    SettingsChoice(
+                        label = "Jellyseerr server",
+                        value = link?.baseUrl?.removePrefix("https://")?.removePrefix("http://")
+                            ?: "Not set",
+                        onClick = { editingServer = true },
+                    )
+                    if (link != null) {
+                        SettingsChoice(
+                            label = "Account",
+                            value = if (link.isSignedIn) "Signed in" else "Sign in",
+                            onClick = { signingIn = true },
+                        )
+                        SettingsAction(
+                            "Browse and request",
+                            onClick = onOpenRequests,
+                        )
+                    }
+                }
+                Text(
+                    "Requests are made with this profile's own Jellyfin account, so "
+                        + "quotas and history stay yours. Only the session is kept — "
+                        + "never the password.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = CinemaColors.TextSecondary,
+                    modifier = Modifier.padding(start = 4.dp, top = 6.dp),
+                )
+            }
+
             item(key = "subtitles") {
                 SettingsSection("Subtitles") {
                     SettingsChoice(
@@ -229,6 +274,32 @@ fun SettingsScreen(
         }
 
         FloatingNavButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart))
+
+        if (editingServer) {
+            JellyseerrServerDialog(
+                current = link?.baseUrl.orEmpty(),
+                onDismiss = { editingServer = false },
+                onSave = { url ->
+                    editingServer = false
+                    onProfileChange(profile.withJellyseerrServer(url))
+                },
+            )
+        }
+        if (signingIn && link != null) {
+            JellyseerrSignInDialog(
+                username = session.displayName,
+                serverLabel = link.baseUrl,
+                onDismiss = { signingIn = false },
+                onSignIn = { password ->
+                    seerr.configure(link.baseUrl, null)
+                    val cookie = seerr.signIn(session.displayName, password)
+                    if (cookie != null) {
+                        onProfileChange(profile.withJellyseerrSession(cookie))
+                    }
+                    cookie != null
+                },
+            )
+        }
     }
 }
 
@@ -426,4 +497,100 @@ private fun SettingsValue(label: String, value: String) {
         }
         HorizontalDivider(color = CinemaColors.SurfaceVariant)
     }
+}
+
+/** Where the Jellyseerr lives. Same shape as the Jellyfin server field. */
+@Composable
+private fun JellyseerrServerDialog(
+    current: String,
+    onDismiss: () -> Unit,
+    onSave: (String?) -> Unit,
+) {
+    var url by remember { mutableStateOf(current) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Jellyseerr server") },
+        text = {
+            OutlinedTextField(
+                value = url,
+                onValueChange = { url = it },
+                singleLine = true,
+                label = { Text("Address") },
+                placeholder = { Text("seerr.example.com") },
+                modifier = Modifier.fillMaxWidth().tvDefaultFocus(),
+            )
+        },
+        confirmButton = { TextButton(onClick = { onSave(url) }) { Text("Save") } },
+        dismissButton = {
+            Row {
+                // Clearing the field is how a profile stops using Jellyseerr
+                if (current.isNotEmpty()) {
+                    TextButton(onClick = { onSave(null) }) { Text("Remove") }
+                }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        },
+    )
+}
+
+/**
+ * Signs the profile in to Jellyseerr with its own Jellyfin account.
+ *
+ * The username is already known; only the password is asked for, and it
+ * leaves this dialog for the network and nowhere else.
+ */
+@Composable
+private fun JellyseerrSignInDialog(
+    username: String,
+    serverLabel: String,
+    onDismiss: () -> Unit,
+    onSignIn: suspend (String) -> Boolean,
+) {
+    var password by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var failed by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = { Text("Sign in to Jellyseerr") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "$username on $serverLabel",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = CinemaColors.TextSecondary,
+                )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it; failed = false },
+                    singleLine = true,
+                    label = { Text("Jellyfin password") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth().tvDefaultFocus(),
+                )
+                if (failed) {
+                    Text(
+                        "Jellyseerr refused those credentials.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !busy && password.isNotEmpty(),
+                onClick = {
+                    busy = true
+                    scope.launch {
+                        val ok = onSignIn(password)
+                        busy = false
+                        if (ok) onDismiss() else failed = true
+                    }
+                },
+            ) { Text(if (busy) "Signing in…" else "Sign in") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text("Cancel") } },
+    )
 }

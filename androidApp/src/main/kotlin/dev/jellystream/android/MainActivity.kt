@@ -77,6 +77,7 @@ import coil.compose.AsyncImage
 import dev.jellystream.shared.AppSettings
 import dev.jellystream.shared.BaseItem
 import dev.jellystream.shared.JellyfinApi
+import dev.jellystream.shared.JellyseerrApi
 import dev.jellystream.shared.PersistedProfiles
 import dev.jellystream.shared.PersistedSession
 import dev.jellystream.shared.UserSession
@@ -108,6 +109,7 @@ private sealed interface Screen {
     data class Series(val item: BaseItem) : Screen
     data object Search : Screen
     data object Settings : Screen
+    data object Requests : Screen
 }
 
 /** App-private storage for the profiles blob (shared module owns the format). */
@@ -163,6 +165,12 @@ private fun JellystreamApp() {
                             .withSettings(current.profileKey, it)
                             .also(settingsStore::save)
                     },
+                    // The Jellyseerr link lives in the profile blob, not in
+                    // the settings one: a session cookie is a credential
+                    onProfileChange = { updated ->
+                        profiles = profiles.withProfile(updated).also(store::saveProfiles)
+                        active = updated
+                    },
                     onLoggedOut = {
                         profiles = profiles.withoutProfile(current)
                             .also(store::saveProfiles)
@@ -217,6 +225,7 @@ private fun SignedInApp(
     profile: PersistedSession,
     settings: AppSettings,
     onSettingsChange: (AppSettings) -> Unit,
+    onProfileChange: (PersistedSession) -> Unit,
     onLoggedOut: () -> Unit,
     onSwitchProfile: () -> Unit,
 ) {
@@ -225,6 +234,12 @@ private fun SignedInApp(
             deviceName = Build.MODEL,
             deviceId = profile.deviceId,
         ).also { it.restoreSession(profile.session) }
+    }
+    val seerr = remember { JellyseerrApi() }
+    // Re-read on every change: pointing at another server or signing in
+    // must take effect without restarting the app
+    LaunchedEffect(profile.jellyseerr) {
+        seerr.configure(profile.jellyseerr?.baseUrl, profile.jellyseerr?.sessionCookie)
     }
     var playing by remember { mutableStateOf<BaseItem?>(null) }
     val backStack = remember { mutableStateListOf<Screen>(Screen.Home) }
@@ -282,11 +297,16 @@ private fun SignedInApp(
                     onBack = ::goBack,
                 )
                 Screen.Search -> SearchScreen(api, onOpen = ::open, onBack = ::goBack)
+                Screen.Requests -> RequestsScreen(seerr, onBack = ::goBack)
                 Screen.Settings -> SettingsScreen(
                     api = api,
+                    seerr = seerr,
+                    profile = profile,
                     session = profile.session,
                     settings = settings,
                     onChange = onSettingsChange,
+                    onProfileChange = onProfileChange,
+                    onOpenRequests = { backStack.add(Screen.Requests) },
                     onSwitchProfile = onSwitchProfile,
                     onLogout = ::logout,
                     onBack = ::goBack,
