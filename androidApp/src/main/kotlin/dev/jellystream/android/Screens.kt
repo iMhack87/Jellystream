@@ -38,6 +38,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -55,6 +56,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import dev.jellystream.shared.DownloadAvailability
+import dev.jellystream.shared.DownloadState
 import dev.jellystream.shared.BaseItem
 import dev.jellystream.shared.ItemRatings
 import dev.jellystream.shared.JellyfinApi
@@ -155,6 +158,9 @@ fun DetailScreen(
     item: BaseItem,
     onPlay: (BaseItem) -> Unit,
     onBack: () -> Unit,
+    download: DownloadAvailability = DownloadAvailability.NOT_A_FILE,
+    downloadState: DownloadState? = null,
+    onDownload: () -> Unit = {},
 ) {
     var full by remember { mutableStateOf(item) }
     LaunchedEffect(item.id) {
@@ -253,6 +259,30 @@ fun DetailScreen(
                         "Play"
                     }
                 )
+            }
+
+            // Offline is a phone and tablet feature: a television has the
+            // server on the same network and nowhere to put 40 GB
+            if (!isTvDevice()) {
+                when {
+                    downloadState != null -> Text(
+                        downloadLabel(downloadState),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = CinemaColors.TextSecondary,
+                    )
+                    download.canDownload -> TextButton(
+                        onClick = onDownload,
+                        modifier = Modifier.dpadFocusEffect(RoundedCornerShape(10.dp)),
+                    ) {
+                        Text("Download")
+                    }
+                    // Say why rather than show a button that would 401
+                    download.explanation != null -> Text(
+                        download.explanation!!,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = CinemaColors.TextSecondary,
+                    )
+                }
             }
 
             full.overview?.let {
@@ -577,4 +607,11 @@ private fun SearchResultCard(api: JellyfinApi, item: BaseItem, onOpen: (BaseItem
             )
         }
     }
+}
+
+private fun downloadLabel(state: DownloadState): String = when (state) {
+    DownloadState.QUEUED -> "Queued for download"
+    DownloadState.DOWNLOADING -> "Downloading…"
+    DownloadState.COMPLETE -> "Available offline"
+    DownloadState.FAILED -> "Download failed — tap Download to retry"
 }

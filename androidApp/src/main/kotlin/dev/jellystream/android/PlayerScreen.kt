@@ -64,6 +64,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
 import dev.jellystream.shared.CueTiming
 import dev.jellystream.shared.SubtitleCue
+import dev.jellystream.shared.DownloadedItem
 import dev.jellystream.shared.BaseItem
 import dev.jellystream.shared.JellyfinApi
 import dev.jellystream.shared.MediaSegment
@@ -81,6 +82,87 @@ import kotlinx.coroutines.launch
  * being cancelled — a screen-tied scope would drop the request.
  */
 private val playbackReportScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+/**
+ * Plays a downloaded file with no server in the loop.
+ *
+ * Separate entry point rather than a flag on [PlayerScreen]: offline there
+ * is nothing to negotiate, no plan to fetch, no progress to post — and a
+ * player that quietly tries any of those hangs on a train.
+ */
+@androidx.annotation.OptIn(UnstableApi::class)
+@Composable
+fun OfflinePlayerScreen(
+    file: java.io.File,
+    item: DownloadedItem,
+    onPosition: (Long) -> Unit,
+    onClose: () -> Unit,
+) {
+    val context = LocalContext.current
+    val settings = LocalAppSettings.current
+
+    val player = remember {
+        val renderersFactory = DefaultRenderersFactory(context)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+        ExoPlayer.Builder(context, renderersFactory)
+            .build()
+            .apply {
+                setMediaItem(MediaItem.fromUri(android.net.Uri.fromFile(file)))
+                prepare()
+                val resumeMs = (item.positionSeconds * 1000).toLong()
+                if (resumeMs > 0) seekTo(resumeMs)
+                playWhenReady = true
+                addListener(object : Player.Listener {
+                    // The same film must not pick a different subtitle track
+                    // just because the server is gone. There is no
+                    // PlaybackInfo offline, so the streams are read back off
+                    // the file itself and handed to the same shared chooser.
+                    private var defaultApplied = false
+
+                    override fun onTracksChanged(tracks: Tracks) {
+                        if (defaultApplied) return
+                        val streams = subtitleStreamsOf(tracks)
+                        if (streams.isEmpty()) return
+                        val desired = settings.chooseSubtitle(streams, audioLanguageOf(tracks))
+                        defaultApplied = applySubtitleDefault(this@apply, tracks, desired)
+                    }
+                })
+            }
+    }
+
+    // The position is kept locally and handed back on the way out; the
+    // server hears about it whenever the network returns
+    DisposableEffect(Unit) {
+        onDispose {
+            onPosition(JellyfinApi.millisecondsToTicks(player.currentPosition))
+            player.release()
+        }
+    }
+
+    BackHandler(onBack = onClose)
+
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { ctx ->
+                PlayerView(ctx).apply {
+                    this.player = player
+                    keepScreenOn = true
+                    setShowSubtitleButton(true)
+                    subtitleView?.setFractionalTextSize(
+                        SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * settings.subtitleScale.toFloat()
+                    )
+                }
+            },
+        )
+        FloatingNavButton(
+            onClick = onClose,
+            icon = Icons.Default.Close,
+            contentDescription = "Close player",
+            modifier = Modifier.align(Alignment.TopStart),
+        )
+    }
+}
 
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
@@ -594,3 +676,30 @@ private fun subtitleMimeType(codec: String?): String? = when (codec?.lowercase()
     "ass", "ssa" -> MimeTypes.TEXT_SSA
     else -> null
 }
+
+/** Media3's own text tracks, described the way the shared chooser expects. */
+@androidx.annotation.OptIn(UnstableApi::class)
+private fun subtitleStreamsOf(tracks: Tracks): List<MediaStream> =
+    tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }.flatMapIndexed { groupIndex, group ->
+        (0 until group.length).map { i ->
+            val format = group.getTrackFormat(i)
+            MediaStream(
+                index = groupIndex * 100 + i,
+                type = "Subtitle",
+                language = format.language,
+                isForced = (format.selectionFlags and C.SELECTION_FLAG_FORCED) != 0,
+                isDefault = (format.selectionFlags and C.SELECTION_FLAG_DEFAULT) != 0,
+            )
+        }
+    }
+
+/** Language of the audio Media3 has selected, which decides the default. */
+@androidx.annotation.OptIn(UnstableApi::class)
+private fun audioLanguageOf(tracks: Tracks): String? =
+    tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
+        .firstNotNullOfOrNull { group ->
+            (0 until group.length).firstOrNull { group.isTrackSelected(it) }
+                ?.let { group.getTrackFormat(it).language }
+        }
+        ?: tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_AUDIO }
+            ?.getTrackFormat(0)?.language
