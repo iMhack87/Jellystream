@@ -37,11 +37,17 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full rationale.
 
 **Getting in.** Log in against any Jellyfin server (https→http fallback for LAN servers, with a warning before credentials cross an insecure link) or pair with **Quick Connect** — the sane way to sign in on a TV. Several accounts share one install through a **"Who's watching?" picker**, each with its own device id and its own preferences.
 
-**Browsing.** A home screen with **Continue Watching** and **Next Up**, movie and episode detail pages, **series browsing** (seasons and episodes), and **search**. Detail pages show the **audience score and the Rotten Tomatoes tomatometer**, colored fresh or rotten. Watched episodes are ticked, and unwatched previews stay blurred so a thumbnail never spoils the next episode.
+**Browsing.** A home screen with **Continue Watching** and **Next Up**, movie and episode detail pages, **series browsing** (seasons and episodes), and **search**. Detail pages show the **audience score and the Rotten Tomatoes tomatometer**, colored fresh or rotten. Watched episodes are ticked, and unwatched previews stay blurred so a thumbnail never spoils the next episode. You choose **which libraries reach the home screen** — the music and photo ones a video player has no use for start switched off, one tap from coming back.
 
 **Playing.** Anything playable **Direct Plays the original file** — mpv+FFmpeg on Apple platforms (the all-formats engine), Media3/ExoPlayer on Android (FFmpeg audio decoders coming next) — with pause/seek controls, **audio and subtitle track selection**, **Skip Intro** driven by the server's media segments, cross-device resume, and progress reporting back to the server. A per-profile **Always transcode** switch is there for the rare file a device cannot decode.
 
-See [docs/BUILDING.md](docs/BUILDING.md) to build.
+**Subtitles.** Films start with the right track already on: **forced subtitles when you understand the audio, full subtitles when you don't**, matched across the `fr`/`fre`/`fra` spellings that different muxers write for the same language. Size is adjustable, and **timing can be nudged in both directions** when a file's subtitles drift.
+
+**Requesting.** Point a profile at a [Jellyseerr](https://github.com/fallenbagel/jellyseerr) and you can **search for what the library does not have, ask for it, and follow what you asked for** — on the phone, the tablet and the television. Requests go through the profile's own Jellyfin account, so quotas and history stay per person; only the session is kept, never the password.
+
+See [docs/BUILDING.md](docs/BUILDING.md) to build, and `tools/` for the local
+servers used to test subtitles and requests — the public Jellyfin demo has
+neither.
 
 ## License
 
