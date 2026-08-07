@@ -59,6 +59,24 @@ data class UserSession(
 }
 
 /**
+ * A profile's link to its Jellyseerr, if it has one.
+ *
+ * This rides with the session rather than with the settings on purpose:
+ * [sessionCookie] is a credential, and the settings blob is plain
+ * app-private storage that explicitly holds nothing secret. Keychain on
+ * Apple, private prefs on Android — the same place the access token lives.
+ */
+@Serializable
+data class JellyseerrLink(
+    val baseUrl: String,
+    /** Null once the server has expired it; the URL is worth keeping. */
+    val sessionCookie: String? = null,
+) {
+    val isSignedIn: Boolean
+        get() = sessionCookie != null
+}
+
+/**
  * What survives an app restart: the session plus the device id it was
  * created with (Jellyfin ties sessions to DeviceId, so it must be stable).
  * Platforms persist the JSON blob (Keychain on Apple, private prefs on
@@ -68,6 +86,7 @@ data class UserSession(
 data class PersistedSession(
     val deviceId: String,
     val session: UserSession,
+    val jellyseerr: JellyseerrLink? = null,
 ) {
     fun toJson(): String = Json.encodeToString(serializer(), this)
 
@@ -87,6 +106,21 @@ data class PersistedSession(
     /** Single uppercase letter for the avatar circle. */
     val initial: String
         get() = session.initial
+
+    /** Points this profile at a Jellyseerr, keeping any existing session. */
+    fun withJellyseerrServer(url: String?): PersistedSession =
+        copy(
+            jellyseerr = url?.trim()?.takeIf { it.isNotEmpty() }?.let { trimmed ->
+                // Changing server invalidates the cookie: it belongs to the
+                // old one, and replaying it elsewhere would just 401
+                val normalized = JellyfinApi.normalizeServerUrl(trimmed)
+                if (jellyseerr?.baseUrl == normalized) jellyseerr
+                else JellyseerrLink(normalized, sessionCookie = null)
+            }
+        )
+
+    fun withJellyseerrSession(cookie: String?): PersistedSession =
+        copy(jellyseerr = jellyseerr?.copy(sessionCookie = cookie))
 
     companion object {
         fun fromJson(json: String): PersistedSession? =

@@ -44,6 +44,8 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
+            // Suspending API surface needs a test dispatcher to be exercised
+            implementation(libs.kotlinx.coroutines.test)
         }
     }
 }
