@@ -373,6 +373,7 @@ class JellyfinApi(
                 subtitleStreams = subtitleStreams,
                 audioLanguage = audioLanguage,
                 mediaSourceId = source.id,
+                container = source.container,
             )
         } else {
             val mediaSourceParam = source.id?.let { "&mediaSourceId=$it" } ?: ""
@@ -384,6 +385,7 @@ class JellyfinApi(
                 subtitleStreams = subtitleStreams,
                 audioLanguage = audioLanguage,
                 mediaSourceId = source.id,
+                container = source.container,
             )
         }
     }
@@ -417,6 +419,43 @@ class JellyfinApi(
         } catch (e: Exception) {
             emptyList()
         }
+    }
+
+    /**
+     * Whether this account may download original files.
+     *
+     * Null when the server would not say — the caller treats that as
+     * allowed, since the download itself either works or comes back 401,
+     * whereas a hidden button on a permissive server has no way back.
+     */
+    suspend fun canDownload(): Boolean? {
+        val s = session ?: return null
+        return try {
+            val user: UserDto = authGet("Users/${s.userId}")
+            user.policy?.enableContentDownloading
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * The original file, untouched — the same bytes Direct Play streams.
+     * Null without a session.
+     */
+    fun downloadUrl(itemId: String): String? {
+        val s = session ?: return null
+        return "${s.baseUrl}/Items/$itemId/Download"
+    }
+
+    /** Container of the file that would be downloaded, for its extension. */
+    suspend fun containerOf(item: BaseItem): String? = try {
+        getPlaybackPlan(item, forceTranscode = false).container
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        null
     }
 
     private fun joinUrl(baseUrl: String, path: String): String =
