@@ -294,7 +294,13 @@ private fun SignedInApp(
     // declaration order and configure() does not suspend, so the first
     // poll already knows which server to ask.
     val arrivalStore = remember { ArrivalStore(context, profile.profileKey) }
-    LaunchedEffect(profile.jellyseerr) {
+    LaunchedEffect(profile.profileKey, profile.jellyseerr) {
+        // The centre lives above the whole app so a notice can paint over
+        // the player, which means it does NOT go away with the profile.
+        // Emptying it here is what stops one account's titles being
+        // announced to the next, and its requests appearing on their home
+        // screen — the same reason the effect is keyed on the profile.
+        arrivals.reset()
         // Nothing stored means this profile has never been polled. Every
         // title already available then was not waited for by anyone, so
         // the first look records them silently.

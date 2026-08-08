@@ -112,13 +112,16 @@ object UnifiedSearch {
         val items = onServer.filter { it.type == "Movie" || it.type == "Series" }
 
         val byKey = mutableMapOf<String, Int>()
-        val byTmdb = mutableMapOf<Int, Int>()
+        // Keyed by id AND kind: TMDb numbers films and shows in separate
+        // sequences, so film 550 and series 550 are unrelated titles and
+        // a bare integer is not an identity.
+        val byTmdb = mutableMapOf<Pair<Int, Boolean>, Int>()
         val hits = mutableListOf<SearchHit>()
         for (item in items) {
             byKey[matchKey(item.name, item.productionYear?.toString())] = hits.size
             // The search call asks for ProviderIds, so this is usually
             // present — and it is the only match that cannot be wrong.
-            item.tmdbId?.let { byTmdb[it] = hits.size }
+            item.tmdbId?.let { byTmdb[it to item.isSeries] = hits.size }
             hits.add(SearchHit(jellyfin = item))
         }
 
@@ -127,7 +130,8 @@ object UnifiedSearch {
             // merges a remake into its original; matching on the id
             // cannot, and the fallback only runs on servers too old or
             // too unscanned to have one.
-            val at = byTmdb[result.id] ?: byKey[matchKey(result.displayTitle, result.year)]
+            val at = byTmdb[result.id to result.isSeries]
+                ?: byKey[matchKey(result.displayTitle, result.year)]
             if (at != null) {
                 hits[at] = hits[at].copy(jellyseerr = result)
             } else {

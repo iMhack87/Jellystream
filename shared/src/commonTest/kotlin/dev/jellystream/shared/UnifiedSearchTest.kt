@@ -176,8 +176,36 @@ class WatchlistTest {
     @Test
     fun twoTitlesWithNothingInCommonStayApart() {
         assertFalse(WatchlistEntry(tmdbId = 1).isSameAs(WatchlistEntry(tmdbId = 2)))
-        // Two entries that know nothing about each other are not the same
-        assertFalse(WatchlistEntry(title = "A").isSameAs(WatchlistEntry(title = "A")))
+        assertFalse(
+            WatchlistEntry(title = "A", year = "2001")
+                .isSameAs(WatchlistEntry(title = "B", year = "2001")),
+        )
+        // A remake is not the original, here as everywhere else
+        assertFalse(
+            WatchlistEntry(title = "Dune", year = "1984")
+                .isSameAs(WatchlistEntry(title = "Dune", year = "2021")),
+        )
+        // TMDb numbers films and shows separately: 550 is two things
+        assertFalse(
+            WatchlistEntry(tmdbId = 550, title = "A", isSeries = false)
+                .isSameAs(WatchlistEntry(tmdbId = 550, title = "B", isSeries = true)),
+        )
+        // Nothing to go on at all
+        assertFalse(WatchlistEntry().isSameAs(WatchlistEntry()))
+    }
+
+    @Test
+    fun theNameIsTheFallbackWhenNeitherSideKnowsTheOthersId() {
+        // ProviderIds only comes back on a single-item fetch, so anything
+        // picked off a shelf has no TMDb id — while an entry added from
+        // search has no item id. Without this the list holds the same show
+        // twice and reconciled() then stamps one item id onto both, which
+        // is a duplicate key in a lazy row, which is a crash.
+        val fromSearch = WatchlistEntry(tmdbId = 87739, title = "Silo", year = "2023", isSeries = true)
+        val fromShelf = WatchlistEntry(itemId = "abc", title = "Silo", year = "2023", isSeries = true)
+
+        assertTrue(fromSearch.isSameAs(fromShelf))
+        assertEquals(1, Watchlist().with(fromSearch).with(fromShelf).entries.size)
     }
 
     @Test
@@ -285,16 +313,19 @@ class ArrivalsTest {
     }
 
     @Test
-    fun theSeenSetForgetsRequestsThatNoLongerExist() {
-        // Otherwise it grows for ever on a server where requests are tidied up
+    fun theSeenSetRemembersEverythingItHasAnnounced() {
         val seen = Arrivals.seen(
             listOf(request(1, 5, "A"), request(2, 5, "B")),
             AnnouncedArrivals(),
         )
         assertEquals(setOf(1, 2), seen.requestIds)
 
-        val pruned = Arrivals.seen(listOf(request(1, 5, "A")), seen)
-        assertEquals(setOf(1), pruned.requestIds)
+        // B has dropped out of the page the poll asks for. It must NOT be
+        // forgotten: the poll only ever sees the newest requests, so an
+        // older id is missing from every answer, and forgetting it means
+        // announcing that title again the day it comes back into view.
+        val later = Arrivals.seen(listOf(request(1, 5, "A")), seen)
+        assertEquals(setOf(1, 2), later.requestIds)
     }
 
     @Test
@@ -349,5 +380,83 @@ class MergeByIdTest {
         )
 
         assertEquals(1, hits.size)
+    }
+}
+
+class WatchlistReconcileTest {
+
+    @Test
+    fun oneItemIdIsNeverStampedOntoTwoEntries() {
+        // Two entries for one show is already wrong; two entries carrying
+        // the SAME item id is a duplicate key in a lazy row, which is a
+        // crash on the home screen that persists across restarts.
+        val list = Watchlist(
+            listOf(
+                WatchlistEntry(tmdbId = 87739, title = "Silo", year = "2023", isSeries = true),
+                WatchlistEntry(itemId = "abc", title = "Silo", year = "2023", isSeries = true),
+            )
+        )
+
+        val reconciled = list.reconciled(listOf(show("Silo", 2023, id = "abc")))
+
+        assertEquals(1, reconciled.entries.size)
+        assertEquals(1, reconciled.entries.mapNotNull { it.itemId }.toSet().size)
+    }
+
+    @Test
+    fun anEntryWithNoYearStillFindsItsTitle() {
+        // Saved from Jellyseerr before a release date was known: matching
+        // on name-and-year alone leaves it un-openable for ever
+        val list = Watchlist().with(WatchlistEntry(tmdbId = 1, title = "Silo", isSeries = true))
+
+        val reconciled = list.reconciled(listOf(show("Silo", 2023, id = "abc")))
+
+        assertEquals("abc", reconciled.entries.first().itemId)
+    }
+
+    @Test
+    fun reconcilingIsStableOnceEverythingHasAnId() {
+        val list = Watchlist().with(WatchlistEntry(tmdbId = 1, title = "Silo", isSeries = true))
+        val onServer = listOf(show("Silo", 2023, id = "abc"))
+
+        val once = list.reconciled(onServer)
+
+        // Converges: a second pass changes nothing, so nothing writes in a loop
+        assertEquals(once, once.reconciled(onServer))
+    }
+}
+
+class AnnouncedCapTest {
+
+    @Test
+    fun theSetKeepsTheNewestAndForgetsTheOldest() {
+        val many = AnnouncedArrivals((1..600).toSet())
+
+        val capped = many.capped(500)
+
+        assertEquals(500, capped.requestIds.size)
+        assertTrue(600 in capped.requestIds)
+        assertFalse(1 in capped.requestIds)
+    }
+
+    @Test
+    fun somethingOutsideTheCurrentPageIsNotForgotten() {
+        // The poll asks for one page of the newest requests, so an older
+        // announced id is absent from every answer. Forgetting it means
+        // announcing that title again the moment it slides back into view.
+        val announced = AnnouncedArrivals(setOf(1, 2, 3))
+        val page = listOf(
+            RequestedTitle(
+                JellyseerrRequest(
+                    id = 9, status = 2,
+                    media = JellyseerrRequestMedia(tmdbId = 9, mediaType = "movie", status = 5),
+                ),
+                title = "New",
+            )
+        )
+
+        val seen = Arrivals.seen(page, announced)
+
+        assertTrue(seen.requestIds.containsAll(setOf(1, 2, 3, 9)))
     }
 }

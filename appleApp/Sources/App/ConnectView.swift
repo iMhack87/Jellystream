@@ -219,6 +219,14 @@ final class AppModel: ObservableObject {
         // Signing back into a known account restores its preferences
         settings = storedSettings.forProfile(profileKey: profile.profileKey)
         watchlist = WatchlistStore(profileKey: profile.profileKey)
+        // And its Jellyseerr — which is a credential, not a preference.
+        // Without this the new account inherits the previous one's server
+        // AND its session cookie, so the arrival poll and every request
+        // made from search go out as somebody else.
+        seerr.configure(
+            serverUrl: profile.jellyseerr?.baseUrl,
+            sessionCookie: profile.jellyseerr?.sessionCookie
+        )
         addingProfile = false
     }
 
@@ -415,6 +423,12 @@ struct RootView: View {
     private func announceArrivals() async {
         guard let profileKey = model.session?.profileKey else { return }
         let seerr = model.seerr
+        // Both of these outlive the signed-in screen so a notice can paint
+        // over the player. Emptying them here is what stops one account's
+        // titles being announced to the next, and its requests turning up
+        // on their home screen.
+        RequestFeed.shared.reset()
+        ArrivalToastWindow.shared.reset()
         while !Task.isCancelled {
             if seerr.isConfigured {
                 // nil is UNREACHABLE, not "no requests": treating it as an
@@ -438,6 +452,9 @@ struct RootView: View {
                     for arrival in landed {
                         ArrivalToastWindow.shared.show(message: arrival.message)
                     }
+                    // The home row reads this instead of fetching its own
+                    // copy: one poll, one truth
+                    RequestFeed.shared.publish(requests)
                 }
             }
             try? await Task.sleep(nanoseconds: 60_000_000_000)

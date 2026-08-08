@@ -35,11 +35,19 @@ data class AnnouncedArrivals(
         AnnouncedArrivals(requestIds + ids)
 
     /**
-     * Forgets requests that no longer exist, so the set cannot grow for
-     * ever on a server where requests get deleted.
+     * Keeps the newest [limit] ids, so the set cannot grow for ever.
+     *
+     * Deliberately NOT "forget anything missing from the last answer":
+     * the poll asks for one page of the newest requests, so an announced
+     * id outside that window is absent from every single answer. Pruning
+     * against it drops the id, and the moment that request slides back
+     * into the page — someone tidies up the newer ones — it is announced
+     * a second time. Jellyseerr's ids only ever climb, so the highest are
+     * the ones worth keeping.
      */
-    fun prunedTo(known: Collection<Int>): AnnouncedArrivals =
-        AnnouncedArrivals(requestIds intersect known.toSet())
+    fun capped(limit: Int): AnnouncedArrivals =
+        if (requestIds.size <= limit) this
+        else AnnouncedArrivals(requestIds.sortedDescending().take(limit).toSet())
 
     fun toJson(): String = Json.encodeToString(serializer(), this)
 
@@ -97,5 +105,12 @@ object Arrivals {
     fun seen(requests: List<RequestedTitle>, announced: AnnouncedArrivals): AnnouncedArrivals =
         announced
             .with(requests.filter { it.state == RequestState.AVAILABLE }.map { it.request.id })
-            .prunedTo(requests.map { it.request.id })
+            .capped(REMEMBERED)
+
+    /**
+     * How many announced ids to keep. Comfortably more than a page of
+     * requests, so nothing still visible can be forgotten and announced
+     * again, and small enough that the blob stays trivial.
+     */
+    const val REMEMBERED = 500
 }

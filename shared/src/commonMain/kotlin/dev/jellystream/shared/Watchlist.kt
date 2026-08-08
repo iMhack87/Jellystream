@@ -33,15 +33,32 @@ data class WatchlistEntry(
         get() = itemId != null
 
     /**
+     * The title, normalised, for when neither side knows the other's id.
+     *
+     * Kind is part of it: TMDb numbers its films and its shows separately,
+     * so film 550 and series 550 are different things.
+     */
+    internal val matchKey: String?
+        get() = title.takeIf { it.isNotBlank() }
+            ?.let { UnifiedSearch.matchKey(it, year) + if (isSeries) "|tv" else "|film" }
+
+    /**
      * Whether two entries are the same title.
      *
-     * Either identifier matching is enough: the same film can arrive as a
-     * TMDb id from search and later as an item id from the library, and
-     * ending up with it twice on the list is the obvious failure.
+     * Either identifier is enough — the same film arrives as a TMDb id
+     * from search and later as an item id from the library. But BOTH
+     * sides having the same identifier populated is exactly what cannot
+     * be relied on: ProviderIds only ever comes back on a single-item
+     * fetch, so anything picked off a shelf carries no TMDb id at all.
+     * Without the name fallback the list happily holds the same show
+     * twice, and [Watchlist.reconciled] then stamps one item id onto both.
      */
-    fun isSameAs(other: WatchlistEntry): Boolean =
-        (itemId != null && itemId == other.itemId) ||
-            (tmdbId != null && tmdbId == other.tmdbId)
+    fun isSameAs(other: WatchlistEntry): Boolean {
+        if (itemId != null && itemId == other.itemId) return true
+        if (tmdbId != null && tmdbId == other.tmdbId && isSeries == other.isSeries) return true
+        val key = matchKey ?: return false
+        return key == other.matchKey
+    }
 
     companion object {
         fun of(item: BaseItem): WatchlistEntry = WatchlistEntry(
@@ -102,19 +119,42 @@ data class Watchlist(
      */
     fun reconciled(onServer: List<BaseItem>): Watchlist {
         if (entries.none { it.itemId == null }) return this
+
         val byKey = onServer.associateBy {
             UnifiedSearch.matchKey(it.name, it.productionYear?.toString())
         }
-        return Watchlist(
-            entries.map { entry ->
-                if (entry.itemId != null) {
-                    entry
-                } else {
-                    val match = byKey[UnifiedSearch.matchKey(entry.title, entry.year)]
-                    if (match != null) entry.copy(itemId = match.id) else entry
+        // A second index without the year. An entry saved from Jellyseerr
+        // before its release date was known has no year, and would never
+        // match a library item that has one — leaving it un-openable for
+        // ever, which is exactly the state this function exists to end.
+        val byName = onServer.associateBy { UnifiedSearch.matchKey(it.name, null) }
+
+        // Item ids already spoken for. Two entries carrying the same id is
+        // a duplicate key in a lazy row, which is a crash rather than a
+        // cosmetic problem.
+        val taken = entries.mapNotNull { it.itemId }.toMutableSet()
+
+        val out = mutableListOf<WatchlistEntry>()
+        for (entry in entries) {
+            if (entry.itemId != null) {
+                out.add(entry)
+                continue
+            }
+            val match = byKey[UnifiedSearch.matchKey(entry.title, entry.year)]
+                ?: byName[UnifiedSearch.matchKey(entry.title, null)]
+            when {
+                match == null -> out.add(entry)
+                // Another entry is already this item: the two are the same
+                // title reached by different routes, so keep the one that
+                // can be opened and drop this one rather than mint a twin.
+                match.id in taken -> Unit
+                else -> {
+                    taken.add(match.id)
+                    out.add(entry.copy(itemId = match.id))
                 }
             }
-        )
+        }
+        return Watchlist(out)
     }
 
     fun toJson(): String = Json.encodeToString(serializer(), this)

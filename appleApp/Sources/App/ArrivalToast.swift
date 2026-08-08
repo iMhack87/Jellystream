@@ -1,5 +1,31 @@
+import Shared
 import SwiftUI
 import UIKit
+
+/**
+ What the arrival poll last saw, for whoever else wants it.
+
+ The home row shows the same requests that poll already fetched, so it
+ reads them from here rather than asking again — one poll, one truth. Two
+ fetches meant two answers, and the one on screen was the older: the
+ notice announced a title while the row under it still said 0%.
+ */
+@MainActor
+final class RequestFeed: ObservableObject {
+    static let shared = RequestFeed()
+
+    @Published private(set) var requests: [RequestedTitle] = []
+
+    func publish(_ rows: [RequestedTitle]) {
+        requests = rows
+    }
+
+    /// Emptied on a profile switch: this outlives the signed-in screen,
+    /// so without it the next account sees the last one's requests.
+    func reset() {
+        requests = []
+    }
+}
 
 /**
  The "<title> has arrived" notice, in its own window.
@@ -66,6 +92,16 @@ final class ArrivalToastWindow {
             }
             runner = nil
         }
+    }
+
+    /// Drops anything queued but not yet shown. Called on a profile
+    /// switch: this object outlives the signed-in screen, so without it
+    /// the next account is told about the last one's titles.
+    func reset() {
+        pending.removeAll()
+        runner?.cancel()
+        runner = nil
+        model.message = nil
     }
 }
 

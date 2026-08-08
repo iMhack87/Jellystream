@@ -633,6 +633,11 @@ private struct Shelf<Content: View>: View {
 private struct RequestedRow: View {
     let seerr: JellyseerrApi
 
+    /// The app-wide arrival poll's own answer. Reading it rather than
+    /// fetching again is what stops the notice announcing a title above a
+    /// row that still says it is downloading — and it keeps the progress
+    /// bars moving without a second poll.
+    @ObservedObject private var feed = RequestFeed.shared
     @State private var rows: [RequestedTitle] = []
 
     var body: some View {
@@ -650,16 +655,25 @@ private struct RequestedRow: View {
             }
         }
         .task { await load() }
+        .onChange(of: feed.requests) { _, published in
+            // Only what can still change: an available request is in the
+            // library by now and already has a row of its own
+            rows = published.filter { $0.isSettling }
+        }
     }
 
     private func load() async {
+        guard seerr.isConfigured else { return }
+        // The poll runs every minute and home is usually the first thing
+        // seen, so take whatever it already has rather than show an empty
+        // row for up to a minute.
+        if !feed.requests.isEmpty {
+            rows = feed.requests.filter { $0.isSettling }
+            return
+        }
         // nil means unreachable, which is not the same as "nothing
         // requested" — leaving the row out beats inventing an answer
-        guard seerr.isConfigured,
-              let all = try? await seerr.myRequestsDetailed(limit: 30)
-        else { return }
-        // Only what can still change: an available request is in the
-        // library by now and already has a row of its own
+        guard let all = try? await seerr.myRequestsDetailed(limit: 30) else { return }
         rows = all.filter { $0.isSettling }
     }
 }

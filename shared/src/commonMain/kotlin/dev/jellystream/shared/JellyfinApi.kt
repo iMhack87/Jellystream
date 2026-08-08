@@ -291,7 +291,11 @@ class JellyfinApi(
             "userId" to s.userId,
             "searchTerm" to query,
             "recursive" to "true",
-            "includeItemTypes" to "Movie,Series,Episode",
+            // Films and shows only. The unified search drops episodes
+            // anyway — a search for a show should offer the show, not
+            // forty rows of it — and asking for them meant they ate the
+            // row limit before being thrown away.
+            "includeItemTypes" to "Movie,Series",
             // ProviderIds is trimmed out of a list DTO unless asked for,
             // and it is the only thing that can tell a title on the server
             // from the same title in Jellyseerr. Without it the unified

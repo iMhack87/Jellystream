@@ -87,6 +87,16 @@ class ArrivalCenter {
     var requests by mutableStateOf<List<RequestedTitle>>(emptyList())
         internal set
 
+    /**
+     * Forgets everything. Called when the profile changes: this object
+     * outlives the signed-in screen on purpose, so without it the next
+     * account inherits the last one's queued notices and requests.
+     */
+    fun reset() {
+        pending.clear()
+        requests = emptyList()
+    }
+
     fun announce(arrivals: List<Arrival>) {
         // A title queued but not yet shown must not be queued again by
         // the poll that runs while it waits
