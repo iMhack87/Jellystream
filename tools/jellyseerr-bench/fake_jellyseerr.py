@@ -179,8 +179,35 @@ def grabs_for(tmdb_id):
     return out
 
 
+def settle_downloads(entry):
+    """A download that finishes makes the title available.
+
+    Without this nothing ever *arrives*, and the whole point of the
+    arrival toast is the moment a request stops being a request. Titles
+    land on their own a few minutes in; `POST /api/v1/bench/land/<id>`
+    does it now, for when waiting three minutes is not the test.
+    """
+    grabs = DOWNLOADS.get(entry["id"])
+    if not grabs or entry.get("status") != PROCESSING:
+        return
+    now = time.monotonic() - START
+    if any(now - g["delay"] < g["seconds"] for g in grabs):
+        return
+    land(entry)
+
+
+def land(entry):
+    """Mark a title, and every season anybody asked for, as available."""
+    entry["status"] = AVAILABLE
+    seasons = entry.get("seasonStatus")
+    if seasons:
+        for number in list(seasons):
+            seasons[number] = AVAILABLE
+
+
 def media_info(entry):
     """The mediaInfo block, or None for a title nobody has ever asked for."""
+    settle_downloads(entry)
     if entry.get("status") is None:
         return None
     return {
@@ -229,8 +256,12 @@ def request_row(row):
     entry = find(row["media"]["tmdbId"])
     media = dict(row["media"])
     if entry is not None:
+        settle_downloads(entry)
         media["status"] = entry.get("status") or UNKNOWN
-        media["downloadStatus"] = grabs_for(entry["id"])
+        # Nothing is still downloading once it has landed
+        media["downloadStatus"] = (
+            [] if entry.get("status") == AVAILABLE else grabs_for(entry["id"])
+        )
     else:
         media.setdefault("downloadStatus", [])
     return {**row, "media": media}
@@ -271,6 +302,14 @@ class Handler(BaseHTTPRequestHandler):
                 {"id": 7, "displayName": body.get("username") or "bench"},
                 cookie=COOKIE,
             )
+
+        m = re.match(r"^/api/v1/bench/land/(\d+)$", path)
+        if m:
+            entry = find(int(m.group(1)))
+            if entry is None:
+                return self._json({"message": "Not found"}, 404)
+            land(entry)
+            return self._json({"landed": entry["id"], "status": entry["status"]})
 
         if path == "/api/v1/bench/reset":
             global START

@@ -176,6 +176,8 @@ data class UserItemData(
     /** Jellyfin ticks: 1 tick = 100 ns, so 1 second = 10_000_000 ticks. */
     @SerialName("PlaybackPositionTicks") val playbackPositionTicks: Long? = null,
     @SerialName("Played") val played: Boolean? = null,
+    /** The server's own favourite flag, shared with every other client. */
+    @SerialName("IsFavorite") val isFavorite: Boolean? = null,
 )
 
 @Serializable
@@ -245,6 +247,29 @@ data class BaseItem(
     /** Fully watched (the server-side Played flag). */
     val isWatched: Boolean
         get() = userData?.played == true
+
+    /** Favourited, as every other Jellyfin client sees it. */
+    val isFavorite: Boolean
+        get() = userData?.isFavorite == true
+
+    /**
+     * The same item with its watched flag flipped, for the screen to show
+     * before the server has answered.
+     *
+     * A toggle that waits for a round trip reads as broken on a remote,
+     * and the position has to go with it: an episode marked watched while
+     * half-played must not keep offering to resume.
+     */
+    fun withWatched(watched: Boolean): BaseItem = copy(
+        userData = (userData ?: UserItemData()).copy(
+            played = watched,
+            playbackPositionTicks = if (watched) 0L else userData?.playbackPositionTicks,
+        )
+    )
+
+    /** The same item with its favourite flag flipped, shown before the server agrees. */
+    fun withFavorite(favorite: Boolean): BaseItem =
+        copy(userData = (userData ?: UserItemData()).copy(isFavorite = favorite))
 
     /**
      * Anti-spoiler rule, decided once for every platform: an episode

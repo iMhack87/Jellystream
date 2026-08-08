@@ -5,10 +5,12 @@ import io.ktor.client.call.body
 import io.ktor.client.plugins.ClientRequestException
 import io.ktor.client.plugins.HttpResponseValidator
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.HttpResponse
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
@@ -290,6 +292,11 @@ class JellyfinApi(
             "searchTerm" to query,
             "recursive" to "true",
             "includeItemTypes" to "Movie,Series,Episode",
+            // ProviderIds is trimmed out of a list DTO unless asked for,
+            // and it is the only thing that can tell a title on the server
+            // from the same title in Jellyseerr. Without it the unified
+            // search has to match on name and year, which merges remakes.
+            "fields" to "ProviderIds",
             "limit" to limit.toString(),
         ).items
     }
@@ -606,6 +613,68 @@ class JellyfinApi(
         "Sessions/Playing/Stopped",
         PlaybackReport(itemId, positionTicks, playSessionId = playSessionId),
     )
+
+    /**
+     * Favourites and watched state, both server-side.
+     *
+     * Jellyfin owns these, which is the point: a heart tapped here shows
+     * up in the web client and on every other device, and a local list
+     * would quietly disagree with all of them.
+     *
+     * Both answer true when the server took it. A false is not worth an
+     * exception — the screen has already flipped optimistically, and the
+     * honest thing is to put it back, not to throw over a tap.
+     */
+    @Throws(Throwable::class)
+    suspend fun setFavorite(itemId: String, favorite: Boolean): Boolean =
+        userItemAction("FavoriteItems/$itemId", add = favorite)
+
+    @Throws(Throwable::class)
+    suspend fun setWatched(itemId: String, watched: Boolean): Boolean =
+        userItemAction("PlayedItems/$itemId", add = watched)
+
+    private suspend fun userItemAction(path: String, add: Boolean): Boolean {
+        val s = requireSession()
+        return try {
+            val url = "${s.baseUrl}/Users/${s.userId}/$path"
+            val response: HttpResponse = if (add) {
+                http.post(url) { header("Authorization", authorizationHeader(s.accessToken)) }
+            } else {
+                http.delete(url) { header("Authorization", authorizationHeader(s.accessToken)) }
+            }
+            response.status.value in 200..299
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Everything favourited, newest first — the Favourites row.
+     *
+     * Episodes are left out on purpose: a row mixing a series with three
+     * of its own episodes is noise, and the series is what people mean.
+     */
+    @Throws(Throwable::class)
+    suspend fun getFavorites(limit: Int = 24): List<BaseItem> {
+        val s = requireSession()
+        return try {
+            authGet<ItemsResult>(
+                "Users/${s.userId}/Items",
+                "filters" to "IsFavorite",
+                "recursive" to "true",
+                "includeItemTypes" to "Movie,Series",
+                "sortBy" to "DateCreated",
+                "sortOrder" to "Descending",
+                "limit" to limit.toString(),
+            ).items
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
 
     private suspend fun postPlaybackReport(path: String, report: PlaybackReport) {
         val s = requireSession()
