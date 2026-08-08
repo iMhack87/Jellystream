@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal Jellyfin stand-in for subtitle end-to-end checks.
+"""Minimal Jellyfin stand-in for subtitle and end-of-season checks.
 
 The public demo server carries no subtitles at all, so the smart default,
 the size and the resync have nothing to act on there. This serves three
@@ -10,6 +10,13 @@ files that differ only in how their tracks are tagged:
                                                is for English speakers)
   3. French audio    + forced FR + full FR  -> forced FR expected
 
+The same three files are served a second time as season 1 of a show whose
+season 2 is deliberately missing. Watch episode 3 to the end and the
+player should offer to request season 2 — the show's TMDb id is the one
+the Jellyseerr bench knows as Severance, where season 2 is requestable, so
+the two benches line up. Forty-second episodes make that testable in a
+minute rather than an hour.
+
 Run: python3 fake_jellyfin.py [port]
 Emulator reaches the host at 10.0.2.2; simulators at localhost.
 """
@@ -17,6 +24,7 @@ import json
 import os
 import re
 import sys
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -49,7 +57,29 @@ ITEMS = [
         "subs": [("fre", True), ("fre", False)],
     },
 ]
+SERIES_ID = "dddddddddddddddddddddddddddddddd"
+SEASON_ID = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+SERIES_NAME = "Severance"
+# Ties this show to the Jellyseerr bench's fixture of the same TMDb id,
+# whose season 1 is available and season 2 is not — which is exactly the
+# state the end-of-season prompt exists for.
+SERIES_TMDB = "95396"
+
+# The same three files again, as season 1. Only season 1 exists here on
+# purpose: season 2 has to be missing for the prompt to have a job.
+EPISODES = [
+    dict(item, id=episode_id, name=title, index=n + 1)
+    for n, (item, episode_id, title) in enumerate(zip(
+        ITEMS,
+        ("e1111111111111111111111111111111",
+         "e2222222222222222222222222222222",
+         "e3333333333333333333333333333333"),
+        ("Good News About Hell", "Half Loop", "In Perpetuity"),
+    ))
+]
+
 BY_ID = {i["id"]: i for i in ITEMS}
+BY_ID.update({e["id"]: e for e in EPISODES})
 
 
 def streams(item):
@@ -82,6 +112,56 @@ def dto(item):
     }
 
 
+def series_dto(with_provider_ids):
+    """The show itself.
+
+    ProviderIds is left off the list form on purpose: real Jellyfin trims
+    it out of the DTO unless a single-item fetch asks for it, and the
+    prompt depends on the app re-fetching the series to find the TMDb id.
+    Handing it out everywhere would hide that bug rather than catch it.
+    """
+    payload = {
+        "Id": SERIES_ID,
+        "Name": SERIES_NAME,
+        "Type": "Series",
+        "ProductionYear": 2022,
+        "Overview": "Season 1 is here; season 2 is the point of the bench.",
+        "UserData": {"PlaybackPositionTicks": 0, "Played": False},
+    }
+    if with_provider_ids:
+        payload["ProviderIds"] = {"Tmdb": SERIES_TMDB, "Imdb": "tt11280740"}
+    return payload
+
+
+def season_dto():
+    return {
+        "Id": SEASON_ID,
+        "Name": "Season 1",
+        "Type": "Season",
+        "IndexNumber": 1,
+        "SeriesId": SERIES_ID,
+        "SeriesName": SERIES_NAME,
+        "UserData": {"PlaybackPositionTicks": 0, "Played": False},
+    }
+
+
+def episode_dto(episode):
+    return {
+        "Id": episode["id"],
+        "Name": episode["name"],
+        "Type": "Episode",
+        "SeriesId": SERIES_ID,
+        "SeriesName": SERIES_NAME,
+        "IndexNumber": episode["index"],
+        "ParentIndexNumber": 1,
+        "RunTimeTicks": 40 * TICKS,
+        "Overview": "Forty seconds, so the end of a season arrives quickly.",
+        "PremiereDate": "2022-02-18T00:00:00.0000000Z",
+        "MediaStreams": streams(episode),
+        "UserData": {"PlaybackPositionTicks": 0, "Played": False},
+    }
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -96,6 +176,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _query(self):
+        return urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
 
     def do_POST(self):
         path = self.path.split("?")[0]
@@ -156,17 +239,51 @@ class Handler(BaseHTTPRequestHandler):
                 return self._serve(os.path.join(HERE, item["file"]))
 
         if path == "/UserViews":
-            return self._json({"Items": [{
-                "Id": "view-movies", "Name": "Movies",
-                "Type": "CollectionFolder", "CollectionType": "movies",
-            }], "TotalRecordCount": 1})
+            return self._json({"Items": [
+                {"Id": "view-movies", "Name": "Movies",
+                 "Type": "CollectionFolder", "CollectionType": "movies"},
+                {"Id": "view-shows", "Name": "Shows",
+                 "Type": "CollectionFolder", "CollectionType": "tvshows"},
+            ], "TotalRecordCount": 2})
         if path.endswith("/Items/Latest"):
-            return self._json([dto(i) for i in ITEMS])
+            parent = self._query().get("parentId", [None])[0]
+            if parent == "view-shows":
+                return self._json([series_dto(with_provider_ids=False)])
+            if parent == "view-movies":
+                return self._json([dto(i) for i in ITEMS])
+            return self._json(
+                [dto(i) for i in ITEMS] + [series_dto(with_provider_ids=False)]
+            )
         if path.endswith("/Items/Resume") or path == "/Shows/NextUp":
             return self._json({"Items": [], "TotalRecordCount": 0})
+
+        m = re.match(r"^/Shows/([^/]+)/Seasons$", path)
+        if m:
+            if m.group(1) != SERIES_ID:
+                return self._json({"Items": [], "TotalRecordCount": 0})
+            return self._json({"Items": [season_dto()], "TotalRecordCount": 1})
+
+        m = re.match(r"^/Shows/([^/]+)/Episodes$", path)
+        if m:
+            season = self._query().get("seasonId", [None])[0]
+            if m.group(1) != SERIES_ID or season not in (None, SEASON_ID):
+                return self._json({"Items": [], "TotalRecordCount": 0})
+            items = [episode_dto(e) for e in EPISODES]
+            return self._json({"Items": items, "TotalRecordCount": len(items)})
+
         m = re.match(r"^/Users/[^/]+/Items/([^/]+)$", path)
-        if m and m.group(1) in BY_ID:
-            return self._json(dto(BY_ID[m.group(1)]))
+        if m:
+            item_id = m.group(1)
+            # The single-item fetch is the only place ProviderIds exists
+            if item_id == SERIES_ID:
+                return self._json(series_dto(with_provider_ids=True))
+            if item_id == SEASON_ID:
+                return self._json(season_dto())
+            episode = next((e for e in EPISODES if e["id"] == item_id), None)
+            if episode:
+                return self._json(episode_dto(episode))
+            if item_id in BY_ID:
+                return self._json(dto(BY_ID[item_id]))
         if path.startswith("/MediaSegments/"):
             return self._json({"Items": [], "TotalRecordCount": 0})
         # One track as WebVTT — what a player asks for when it needs to
@@ -243,5 +360,6 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8096
-    print(f"Subtitle bench on :{port} — {len(ITEMS)} fixtures")
+    print(f"Subtitle bench on :{port} — {len(ITEMS)} films, "
+          f"1 show with season 1 only ({len(EPISODES)} episodes)")
     ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()

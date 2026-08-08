@@ -201,10 +201,30 @@ data class BaseItem(
     @SerialName("ParentBackdropItemId") val parentBackdropItemId: String? = null,
     @SerialName("ParentBackdropImageTags") val parentBackdropImageTags: List<String>? = null,
     @SerialName("PremiereDate") val premiereDate: String? = null,
+    /**
+     * Only ever populated on a single-item fetch: the list endpoints trim
+     * it out of the DTO unless it is named in `fields`.
+     */
+    @SerialName("ProviderIds") val providerIds: Map<String, String>? = null,
 ) {
     /** "yyyy-MM-dd" air date, null when the server didn't send one. */
     val premiereDateIso: String?
         get() = premiereDate?.takeIf { it.length >= 10 }?.take(10)
+
+    /**
+     * The TMDb id — the one identifier Jellyfin and Jellyseerr agree on,
+     * and so the only way to ask for more of a show you are watching.
+     *
+     * The key's casing has drifted between Jellyfin versions, hence the
+     * case-insensitive lookup, and it arrives as a string while Jellyseerr
+     * wants a number.
+     */
+    val tmdbId: Int?
+        get() = providerIds
+            ?.entries
+            ?.firstOrNull { it.key.equals("Tmdb", ignoreCase = true) }
+            ?.value
+            ?.toIntOrNull()
 
     /** Audience score, tomatometer and age certificate, ready to display. */
     val ratings: ItemRatings

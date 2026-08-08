@@ -6,6 +6,9 @@ import Shared
 /// badge on the still; episode number, title, synopsis and air date below).
 struct SeriesView: View {
     let api: JellyfinApi
+    /// Only ever handed on to the player, for the end-of-episode offer —
+    /// this is the screen its episodes are launched from.
+    let seerr: JellyseerrApi
     let series: BaseItem
 
     @State private var seasons: [BaseItem] = []
@@ -59,7 +62,7 @@ struct SeriesView: View {
             episodes = (try? await api.getEpisodes(seriesId: series.id, seasonId: season.id)) ?? []
         }
         .fullScreenCover(item: $playingItem) { playing in
-            PlayerScreen(api: api, item: playing, settings: appSettings)
+            PlayerScreen(api: api, item: playing, settings: appSettings, seerr: seerr)
         }
     }
 
