@@ -13,7 +13,9 @@ struct RequestsView: View {
 
     @State private var query = ""
     @State private var results: [JellyseerrResult] = []
-    @State private var mine: [JellyseerrRequest] = []
+    /// Titles, posters and download progress already resolved by the shared
+    /// module — the raw requests endpoint carries a TMDb id and nothing else.
+    @State private var mine: [RequestedTitle] = []
     @State private var searching = false
     @State private var notice: String?
     /// Optimistic per-title state: the list has to react before the server
@@ -32,8 +34,8 @@ struct RequestsView: View {
                         Text("Nothing requested yet. Search above to ask for a film or a series.")
                             .foregroundStyle(.secondary)
                     }
-                    ForEach(mine, id: \.id) { request in
-                        RequestRow(request: request)
+                    ForEach(mine, id: \.request.id) { row in
+                        RequestRow(row: row)
                     }
                 }
             } else if searching {
@@ -44,8 +46,10 @@ struct RequestsView: View {
                 Section("Results") {
                     ForEach(results, id: \.id) { result in
                         ResultRow(
+                            seerr: seerr,
                             result: result,
                             state: justRequested[Int(result.id)] ?? result.state,
+                            notice: $notice,
                             onRequest: { request(result) }
                         )
                     }
@@ -68,6 +72,16 @@ struct RequestsView: View {
         #endif
         .task(id: query) { await runSearch() }
         .task { mine = await loadRequests() }
+        // A progress bar nobody refreshes is a screenshot. Keyed on whether
+        // anything is actually moving, so the loop stops dead once the last
+        // download lands — and starts again on its own when a new one
+        // begins. Leaving this screen open must not keep a NAS awake all
+        // night; `.task` also ends it the moment the screen goes away.
+        .task(id: isDownloading) { await pollRequests() }
+    }
+
+    private var isDownloading: Bool {
+        mine.contains { $0.progress != nil }
     }
 
     private func runSearch() async {
@@ -85,8 +99,18 @@ struct RequestsView: View {
         searching = false
     }
 
-    private func loadRequests() async -> [JellyseerrRequest] {
-        (try? await seerr.myRequests(limit: 30)) ?? []
+    /// Re-asks every 5 s for as long as at least one row is downloading.
+    private func pollRequests() async {
+        while isDownloading {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard !Task.isCancelled else { return }
+            mine = await loadRequests()
+        }
+    }
+
+    private func loadRequests() async -> [RequestedTitle] {
+        // Kotlin default arguments do not bridge — the limit is spelled out
+        (try? await seerr.myRequestsDetailed(limit: 30)) ?? []
     }
 
     private func request(_ result: JellyseerrResult) {
@@ -115,14 +139,34 @@ struct RequestsView: View {
 }
 
 private struct ResultRow: View {
+    let seerr: JellyseerrApi
     let result: JellyseerrResult
     let state: RequestState
+    @Binding var notice: String?
     let onRequest: () -> Void
 
     var body: some View {
         // Only a title you can actually ask for is a target; a Request
         // control next to something already downloading is a lie
-        if state.canRequest {
+        if state.canRequest && result.isSeries {
+            // A show is rarely wanted whole — one missing season is the
+            // common case. The picker leads with "All seasons", so asking
+            // for everything is still a single extra press, and it is this
+            // row's own request path, so the chip here flips too. A film
+            // has nothing to pick and keeps requesting on the spot.
+            NavigationLink {
+                SeasonPickerView(
+                    seerr: seerr,
+                    tmdbId: result.id,
+                    showTitle: result.displayTitle,
+                    showYear: result.year,
+                    notice: $notice,
+                    onRequestAll: onRequest
+                )
+            } label: {
+                content
+            }
+        } else if state.canRequest {
             Button(action: onRequest) { content }
         } else {
             content
@@ -159,27 +203,72 @@ private struct ResultRow: View {
 }
 
 private struct RequestRow: View {
-    let request: JellyseerrRequest
+    let row: RequestedTitle
 
     var body: some View {
-        HStack {
+        HStack(spacing: 14) {
+            AsyncImage(
+                url: JellyseerrApi.companion.posterUrl(posterPath: row.posterPath, width: 185)
+                    .flatMap { URL(string: $0) }
+            ) { image in
+                image.resizable().scaledToFill()
+            } placeholder: {
+                // A row whose detail lookup failed still has no poster path
+                // and still deserves a row — a plain rectangle, never the
+                // system's broken-image glyph
+                Rectangle().fill(Color(white: 0.15))
+            }
+            .frame(width: 48, height: 72)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+
             VStack(alignment: .leading, spacing: 3) {
-                // The requests endpoint carries no title, only a TMDb id —
-                // saying what kind of thing it is beats showing a number
-                Text(request.isSeries ? "Series request" : "Film request")
-                    .font(.headline)
-                if let created = request.createdAt?.prefix(10) {
-                    Text(String(created)).font(.caption).foregroundStyle(.secondary)
+                Text(row.displayTitle).font(.headline)
+                Text(row.subtitle).font(.caption).foregroundStyle(.secondary)
+
+                // Only while something is moving: a bar on an approved
+                // request nobody has started fetching says nothing
+                if let progress = row.progress {
+                    RequestProgressBar(progress: progress)
+                        .padding(.top, 5)
+                    Text(progress.summary)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
             }
             Spacer()
-            StateChip(state: request.state)
+            StateChip(state: row.state)
         }
     }
 }
 
+/**
+ The thin determinate bar under a downloading request.
+
+ Muted rather than accented when the grab has stalled: the percentage is
+ still true, but the bar must not pretend it is moving.
+ */
+private struct RequestProgressBar: View {
+    let progress: RequestProgress
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                // White on black, like the episode progress bars — not
+                // Color.accentColor, which is the system blue this app
+                // never uses and which the Android twin cannot match.
+                Capsule().fill(.white.opacity(0.35))
+                Capsule()
+                    .fill(progress.isStalled ? .white.opacity(0.45) : .white)
+                    .frame(width: geo.size.width * CGFloat(min(max(progress.fraction, 0), 1)))
+            }
+        }
+        .frame(height: 4)
+    }
+}
+
 /// The one place a request state turns into something on screen.
-private struct StateChip: View {
+/// Shared with the season picker — one look for "where this stands".
+struct StateChip: View {
     let state: RequestState
 
     var body: some View {

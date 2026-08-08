@@ -3,14 +3,17 @@ import Shared
 
 struct DetailView: View {
     let api: JellyfinApi
+    /// Only ever handed on to the player, for the end-of-episode offer.
+    let seerr: JellyseerrApi
     @State private var item: BaseItem
     @State private var playingItem: BaseItem?
     @Environment(\.appSettings) private var appSettings
     @Environment(\.downloader) private var downloader
     @Environment(\.downloadingAllowed) private var downloadingAllowed
 
-    init(api: JellyfinApi, item: BaseItem) {
+    init(api: JellyfinApi, seerr: JellyseerrApi, item: BaseItem) {
         self.api = api
+        self.seerr = seerr
         _item = State(initialValue: item)
     }
 
@@ -129,7 +132,7 @@ struct DetailView: View {
             }
         }
         .fullScreenCover(item: $playingItem) { playing in
-            PlayerScreen(api: api, item: playing, settings: appSettings)
+            PlayerScreen(api: api, item: playing, settings: appSettings, seerr: seerr)
         }
     }
 

@@ -48,7 +48,7 @@ struct HomeView: View {
             .task { downloadingAllowed = try? await api.canDownload()?.boolValue }
             .preferredColorScheme(.dark)
             .fullScreenCover(item: $playingItem) { item in
-                PlayerScreen(api: api, item: item, settings: settings)
+                PlayerScreen(api: api, item: item, settings: settings, seerr: seerr)
             }
             #if !os(tvOS)
             .sheet(isPresented: $showDownloads) {
@@ -79,9 +79,15 @@ struct HomeView: View {
                             communityRating: nil, criticRating: nil, officialRating: nil,
                             indexNumber: nil, parentIndexNumber: nil,
                             backdropImageTags: nil, parentBackdropItemId: nil,
-                            parentBackdropImageTags: nil, premiereDate: nil
+                            parentBackdropImageTags: nil, premiereDate: nil,
+                            providerIds: nil
                         ),
                         settings: settings,
+                        // Offline: this synthetic BaseItem is a "Movie" with
+                        // no series identity, so the advisor would answer nil
+                        // anyway — no reason to hand it a Jellyseerr it
+                        // cannot reach on a train
+                        seerr: nil,
                         localFile: downloadedFileURL(
                             profileKey: profile.profileKey, item: offline
                         ),
@@ -102,14 +108,14 @@ struct HomeView: View {
         TabView(selection: $tab) {
             NavigationStack {
                 homeScroll
-                    .itemDestination(api: api)
+                    .itemDestination(api: api, seerr: seerr)
             }
             .tabItem { Label("Home", systemImage: "house") }
             .tag(Tab.home)
 
             NavigationStack {
                 SearchView(api: api)
-                    .itemDestination(api: api)
+                    .itemDestination(api: api, seerr: seerr)
             }
             .tabItem { Label("Search", systemImage: "magnifyingglass") }
             .tag(Tab.search)
@@ -126,7 +132,7 @@ struct HomeView: View {
     private var content: some View {
         NavigationStack {
             homeScroll
-                .itemDestination(api: api)
+                .itemDestination(api: api, seerr: seerr)
                 .navigationDestination(isPresented: $showSearch) {
                     SearchView(api: api)
                 }
@@ -267,13 +273,15 @@ extension BaseItem: @retroactive Identifiable {}
 extension View {
     /// Where a `NavigationLink(value: BaseItem)` lands. Every navigation
     /// stack that shows items declares it — on tvOS home and search are
-    /// separate tabs, so separate stacks.
-    func itemDestination(api: JellyfinApi) -> some View {
+    /// separate tabs, so separate stacks. `seerr` rides along because both
+    /// destinations open the player, which offers the next season at the
+    /// end of an episode.
+    func itemDestination(api: JellyfinApi, seerr: JellyseerrApi) -> some View {
         navigationDestination(for: BaseItem.self) { item in
             if item.isSeries {
-                SeriesView(api: api, series: item)
+                SeriesView(api: api, seerr: seerr, series: item)
             } else {
-                DetailView(api: api, item: item)
+                DetailView(api: api, seerr: seerr, item: item)
             }
         }
     }
