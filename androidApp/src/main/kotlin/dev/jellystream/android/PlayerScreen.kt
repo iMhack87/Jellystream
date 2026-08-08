@@ -32,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,9 +68,14 @@ import dev.jellystream.shared.SubtitleCue
 import dev.jellystream.shared.DownloadedItem
 import dev.jellystream.shared.BaseItem
 import dev.jellystream.shared.JellyfinApi
+import dev.jellystream.shared.JellyseerrApi
 import dev.jellystream.shared.MediaSegment
+import dev.jellystream.shared.NextSeasonAdvisor
+import dev.jellystream.shared.NextSeasonOffer
 import dev.jellystream.shared.PlaybackPlan
+import dev.jellystream.shared.RequestOutcome
 import dev.jellystream.shared.SkipSegments
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -166,7 +172,12 @@ fun OfflinePlayerScreen(
 
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
-fun PlayerScreen(api: JellyfinApi, item: BaseItem, onClose: () -> Unit) {
+fun PlayerScreen(
+    api: JellyfinApi,
+    seerr: JellyseerrApi,
+    item: BaseItem,
+    onClose: () -> Unit,
+) {
     var plan by remember { mutableStateOf<PlaybackPlan?>(null) }
     // Seeded from the profile's settings; the Direct Play failure path can
     // still flip it on for this item alone
@@ -174,6 +185,7 @@ fun PlayerScreen(api: JellyfinApi, item: BaseItem, onClose: () -> Unit) {
     var forceTranscode by remember { mutableStateOf(alwaysTranscode) }
     var failed by remember { mutableStateOf(false) }
     var segments by remember { mutableStateOf<List<MediaSegment>>(emptyList()) }
+    var nextSeason by remember { mutableStateOf<NextSeasonOffer?>(null) }
 
     LaunchedEffect(item.id, forceTranscode) {
         plan = api.getPlaybackPlan(item, forceTranscode)
@@ -183,6 +195,20 @@ fun PlayerScreen(api: JellyfinApi, item: BaseItem, onClose: () -> Unit) {
     // no segment provider, so the button simply never shows
     LaunchedEffect(item.id) {
         segments = api.getMediaSegments(item.id)
+    }
+
+    // Resolved while the video is still loading, not when it ends: the
+    // advisor costs up to four round trips, and a card that only starts
+    // asking as the credits roll arrives after the remote is back down.
+    // It is decoration on top of playback — never a reason it fails.
+    LaunchedEffect(item.id) {
+        nextSeason = try {
+            NextSeasonAdvisor(api, seerr).offerAfter(item)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
     }
 
     BackHandler(onBack = onClose)
@@ -208,9 +234,11 @@ fun PlayerScreen(api: JellyfinApi, item: BaseItem, onClose: () -> Unit) {
             key(currentPlan.url) {
                 PlayerSurface(
                     api = api,
+                    seerr = seerr,
                     item = item,
                     plan = currentPlan,
                     segments = segments,
+                    offer = nextSeason,
                     onDirectPlayFailed = {
                         if (!currentPlan.isTranscode && !forceTranscode) {
                             forceTranscode = true
@@ -237,14 +265,22 @@ fun PlayerScreen(api: JellyfinApi, item: BaseItem, onClose: () -> Unit) {
 @Composable
 private fun PlayerSurface(
     api: JellyfinApi,
+    seerr: JellyseerrApi,
     item: BaseItem,
     plan: PlaybackPlan,
     segments: List<MediaSegment>,
+    offer: NextSeasonOffer?,
     onDirectPlayFailed: () -> Unit,
 ) {
     val context = LocalContext.current
     val settings = LocalAppSettings.current
     val subtitleScale = settings.subtitleScale
+
+    // Nothing here listened for the end of a stream before, so the offer
+    // had no moment to appear in. Set from the player's own callback and
+    // read by the card below.
+    var playbackEnded by remember { mutableStateOf(false) }
+    var offerDismissed by remember { mutableStateOf(false) }
 
     // Segments are in media time; the plan says where the stream clock
     // starts (transcode windows open at the resume point)
@@ -293,6 +329,10 @@ private fun PlayerSurface(
                 addListener(object : Player.Listener {
                     override fun onPlayerError(error: PlaybackException) {
                         onDirectPlayFailed()
+                    }
+
+                    override fun onPlaybackStateChanged(state: Int) {
+                        if (state == Player.STATE_ENDED) playbackEnded = true
                     }
 
                     // The track list only exists once demuxing has started,
@@ -446,7 +486,11 @@ private fun PlayerSurface(
         activeSegment?.let { shownSegment = it }
 
         AnimatedVisibility(
-            visible = activeSegment != null,
+            // An outro segment usually runs to the last frame, so at
+            // STATE_ENDED the pill is still "active". Two overlays grabbing
+            // D-pad focus in the same frame race, and the loser leaves the
+            // remote pointing at nothing — so the card is the only one left.
+            visible = activeSegment != null && !playbackEnded,
             enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
             exit = fadeOut(),
             modifier = Modifier
@@ -464,7 +508,166 @@ private fun PlayerSurface(
                 },
             )
         }
+
+        // Last child of the box on purpose: it belongs over the video, the
+        // controls and the skip pill.
+        val endOfSeason = offer
+        if (playbackEnded && endOfSeason != null && !offerDismissed) {
+            NextSeasonCard(
+                offer = endOfSeason,
+                seerr = seerr,
+                onDismiss = { offerDismissed = true },
+            )
+        }
     }
+}
+
+/**
+ * The offer at the end of an episode, over the paused video.
+ *
+ * Dismissing it leaves the player exactly where it was: someone who says
+ * "Not now" wants the credits, not the home screen.
+ */
+@Composable
+private fun NextSeasonCard(
+    offer: NextSeasonOffer,
+    seerr: JellyseerrApi,
+    onDismiss: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var sent by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf<String?>(null) }
+
+    // Composed only once the card is up, so it registers after the
+    // player's own handler and answers first: Back closes the card and
+    // leaves playback alone.
+    BackHandler(onBack = onDismiss)
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.72f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(24.dp)
+                .widthIn(max = 520.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(CinemaColors.Surface)
+                .padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (sent) {
+                Text(
+                    "Requested — it'll appear once it downloads.",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = CinemaColors.TextPrimary,
+                )
+            } else {
+                Text(
+                    offer.title,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = CinemaColors.TextPrimary,
+                )
+                Text(
+                    offer.body,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = CinemaColors.TextSecondary,
+                )
+            }
+            message?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                when {
+                    sent -> PlayerCardButton("Close", isPrimary = true, grabsFocus = true, onClick = onDismiss)
+                    offer.alreadyRequested ->
+                        PlayerCardButton("OK", isPrimary = true, grabsFocus = true, onClick = onDismiss)
+                    else -> {
+                        PlayerCardButton(
+                            label = "Request season ${offer.seasonNumber}",
+                            isPrimary = true,
+                            grabsFocus = true,
+                            onClick = {
+                                scope.launch {
+                                    val outcome = seerr.requestSeasons(
+                                        offer.seriesTmdbId,
+                                        listOf(offer.seasonNumber),
+                                    )
+                                    when (outcome) {
+                                        // Already asked for means the same
+                                        // thing to the viewer as just asked
+                                        is RequestOutcome.Sent,
+                                        is RequestOutcome.AlreadyRequested -> {
+                                            message = null
+                                            sent = true
+                                        }
+                                        is RequestOutcome.NotSignedIn ->
+                                            message = "Sign in to Jellyseerr again in Settings"
+                                        is RequestOutcome.Failed -> message = outcome.message
+                                    }
+                                }
+                            },
+                        )
+                        PlayerCardButton("Not now", isPrimary = false, grabsFocus = false, onClick = onDismiss)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * A card button in the player's own language: translucent over the video,
+ * inverting to a solid capsule under the D-pad.
+ *
+ * [grabsFocus] belongs to exactly one button per card — two requestFocus()
+ * calls in the same frame race, and the loser leaves the remote pointing
+ * at nothing.
+ */
+@Composable
+private fun PlayerCardButton(
+    label: String,
+    isPrimary: Boolean,
+    grabsFocus: Boolean,
+    onClick: () -> Unit,
+) {
+    val context = LocalContext.current
+    val isTv = remember {
+        context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+    }
+    val focusRequester = remember { FocusRequester() }
+    var focused by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        if (isTv && grabsFocus) focusRequester.requestFocus()
+    }
+
+    val shape = RoundedCornerShape(12.dp)
+    Text(
+        text = label,
+        color = if (focused || isPrimary) Color.Black else Color.White,
+        style = MaterialTheme.typography.titleMedium,
+        modifier = Modifier
+            .dpadFocusEffect(shape, scaleOnFocus = false)
+            .clip(shape)
+            .background(
+                when {
+                    focused -> Color.White
+                    isPrimary -> Color.White.copy(alpha = 0.9f)
+                    else -> Color.White.copy(alpha = 0.16f)
+                }
+            )
+            .focusRequester(focusRequester)
+            .onFocusChanged { focused = it.isFocused }
+            .clickable { onClick() }
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+    )
 }
 
 /**

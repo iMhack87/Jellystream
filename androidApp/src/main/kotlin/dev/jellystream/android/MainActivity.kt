@@ -376,7 +376,10 @@ private fun SignedInApp(
             }
 
             playing?.let { item ->
-                PlayerScreen(api, item, onClose = { playing = null })
+                // The player needs Jellyseerr too: finishing the last
+                // episode a season has is where asking for the next one
+                // actually occurs to someone
+                PlayerScreen(api, seerr, item, onClose = { playing = null })
             }
         }
     }
