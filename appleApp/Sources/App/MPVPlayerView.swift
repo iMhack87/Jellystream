@@ -52,6 +52,10 @@ final class PlayerModel: ObservableObject {
     /// seconds into the credits has already missed the remote. Same timing
     /// as the Android player.
     @Published var nextSeasonOffer: NextSeasonOffer?
+    /// The episode that follows this one, resolved at the same moment and
+    /// for the same reason. Jellyfin alone knows it, so unlike the season
+    /// offer it does not need a Jellyseerr to exist.
+    @Published var nextEpisodeOffer: NextEpisodeOffer?
     /// mpv has run out of file. Latched, never cleared: this is what raises
     /// the offer card, and the card is dismissed by the viewer, not by a seek.
     @Published var reachedEnd = false
@@ -196,6 +200,17 @@ final class PlayerModel: ObservableObject {
                     seerr: seerr
                 ).offerAfter(episode: self.item)
             }
+        }
+
+        // And is there simply a next episode? Asked separately from the
+        // season above, not as a step of it: the two answers are
+        // independent, and a Jellyseerr that hangs must not cost the offer
+        // that needs nothing but Jellyfin. nil for a film, and for the
+        // last episode of the last season the server holds.
+        Task { [weak self] in
+            guard let self else { return }
+            self.nextEpisodeOffer = try? await NextEpisodeAdvisor(jellyfin: self.api)
+                .after(episode: self.item)
         }
 
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
@@ -457,16 +472,68 @@ struct MPVPlayerView: UIViewRepresentable {
     }
 }
 
+/**
+ The player as the rest of the app knows it — and the one thing that
+ outlives an episode: which episode is playing.
+
+ Playing the next one swaps [item], and `.id()` rebuilds everything
+ underneath exactly as if the player had just been opened: a new mpv on a
+ new Metal layer, a new plan, a fresh end-of-episode card. Reloading mpv in
+ place would save a black frame and cost the one guarantee worth having —
+ that the second episode runs down the same path as the first.
+ */
 struct PlayerScreen: View {
+    private let api: JellyfinApi
+    private let settings: AppSettings
+    private let seerr: JellyseerrApi?
+    private let localFile: URL?
+    private let onOfflinePosition: ((Int64) -> Void)?
+    @State private var item: BaseItem
+
+    init(
+        api: JellyfinApi,
+        item: BaseItem,
+        settings: AppSettings,
+        seerr: JellyseerrApi?,
+        localFile: URL? = nil,
+        onOfflinePosition: ((Int64) -> Void)? = nil
+    ) {
+        self.api = api
+        self.settings = settings
+        self.seerr = seerr
+        self.localFile = localFile
+        self.onOfflinePosition = onOfflinePosition
+        _item = State(initialValue: item)
+    }
+
+    var body: some View {
+        PlayerHost(
+            api: api,
+            item: item,
+            settings: settings,
+            seerr: seerr,
+            localFile: localFile,
+            onOfflinePosition: onOfflinePosition,
+            onPlayNext: { item = $0 }
+        )
+        .id(item.id)
+    }
+}
+
+/// Which button of the end-of-episode card the Focus Engine should hold.
+/// Only the primary is ever moved to by hand; the rest is the engine's job.
+private enum OfferButton: Hashable { case primary, secondary, tertiary }
+
+private struct PlayerHost: View {
     @StateObject private var model: PlayerModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.appSettings) private var appSettings
+    /// Swaps the episode this player is showing — the parent owns that
+    /// state, so the whole player is rebuilt around the new one.
+    private let onPlayNext: (BaseItem) -> Void
     #if os(tvOS)
     @State private var showTracks = false
     @FocusState private var skipFocused: Bool
-    /// The card owns two buttons at most; the Focus Engine needs to be told
-    /// which, because the primary one is replaced after a successful request.
-    private enum OfferButton: Hashable { case primary, secondary }
     @FocusState private var offerFocus: OfferButton?
     #endif
 
@@ -480,6 +547,9 @@ struct PlayerScreen: View {
     /// nowhere else: an alert over a paused episode is not an answer.
     @State private var offerNotice: String?
     @State private var offerBusy = false
+    /// Seconds before the next episode starts on its own, nil when nothing
+    /// is counting. Only ever set while the card has no question of its own.
+    @State private var countdown: Int?
 
     // Settings arrive as a parameter, not from the environment: the model
     // is built in init, before @Environment is readable, and mpv needs the
@@ -490,9 +560,11 @@ struct PlayerScreen: View {
         item: BaseItem,
         settings: AppSettings,
         seerr: JellyseerrApi?,
-        localFile: URL? = nil,
-        onOfflinePosition: ((Int64) -> Void)? = nil
+        localFile: URL?,
+        onOfflinePosition: ((Int64) -> Void)?,
+        onPlayNext: @escaping (BaseItem) -> Void
     ) {
+        self.onPlayNext = onPlayNext
         _model = StateObject(
             wrappedValue: PlayerModel(
                 api: api,
@@ -506,6 +578,81 @@ struct PlayerScreen: View {
     }
 
     var body: some View {
+        ZStack {
+            // Playback itself, and nothing that asks a question.
+            //
+            // The arrow keys are why this is its own container. A tvOS
+            // `.onMoveCommand` swallows every directional press made
+            // anywhere in its subtree — handled or not, guarded or not —
+            // so an overlay with two buttons sitting under it can never
+            // move focus between them. On the season card that shipped,
+            // "Not now" was unreachable by remote for exactly this
+            // reason, and the guard inside the handler did nothing to
+            // help: it stops the seek, not the swallow. Seeking belongs
+            // to the video, so the handler belongs to the video — and the
+            // Focus Engine gets the arrows back everywhere else.
+            playbackLayer
+
+            #if os(tvOS)
+            if showTracks {
+                TrackPanel(model: model)
+            }
+            #endif
+
+            // There is a next episode to play, or a next season Jellyseerr
+            // could go and get, or both. Raised only when the file actually
+            // runs out — and only when an advisor found something, so an
+            // episode with nothing after it still ends in silence.
+            if showOffer, hasEndCard {
+                endCard(next: model.nextEpisodeOffer, season: model.nextSeasonOffer)
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: model.skipSegment == nil)
+        // Two empty advisors mean today's behaviour: the file ends, nothing
+        // happens. Every edge matters: an advisor costs several round trips
+        // and can easily answer AFTER a short episode has run out, and
+        // watching only reachedEnd would drop the card on exactly the slow
+        // servers that need it most.
+        .onChange(of: model.reachedEnd) { _, _ in raiseEndCard() }
+        .onChange(of: model.nextSeasonOffer == nil) { _, _ in raiseEndCard() }
+        .onChange(of: model.nextEpisodeOffer == nil) { _, _ in raiseEndCard() }
+        #if os(tvOS)
+        .onExitCommand {
+            // Menu closes whatever sits on top of the video, innermost
+            // first. Quitting the player instead would throw the viewer out
+            // of the episode for pressing the one obvious "go back" key.
+            if showOffer {
+                dismissOffer()
+            } else if showTracks {
+                showTracks = false
+            } else {
+                dismiss()
+            }
+        }
+        // The pill grabs focus on appear so one center press skips; when it
+        // leaves, focus falls back to the player view (arrows seek again).
+        // Never steal focus while another overlay is open — the pill is
+        // hidden then, and re-grabs when that overlay closes mid-segment.
+        .onChange(of: model.skipSegment == nil) { _, isNil in
+            skipFocused = !isNil && !showTracks && !showOffer
+        }
+        .onChange(of: showTracks) { _, open in
+            if !open && !showOffer && model.skipSegment != nil {
+                skipFocused = true
+            }
+        }
+        .onChange(of: showOffer) { _, up in
+            if up {
+                offerFocus = .primary
+            } else if model.skipSegment != nil {
+                skipFocused = true
+            }
+        }
+        #endif
+        .onDisappear { model.shutdown() }
+    }
+
+    private var playbackLayer: some View {
         ZStack {
             MPVPlayerView(model: model, forceTranscode: appSettings.alwaysTranscode)
                 .ignoresSafeArea()
@@ -537,12 +684,6 @@ struct PlayerScreen: View {
                 controls
             }
             .padding()
-            #endif
-
-            #if os(tvOS)
-            if showTracks {
-                TrackPanel(model: model)
-            }
             #endif
 
             // Apple TV+-style timed skip pill: appears when playback enters
@@ -590,38 +731,15 @@ struct PlayerScreen: View {
                 #endif
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
-
-            // The next season isn't on the server, and Jellyseerr can go and
-            // get it. Raised only when the file actually runs out — and only
-            // when the advisor found something, so the usual episode still
-            // ends in silence, exactly as before.
-            if showOffer, let offer = model.nextSeasonOffer {
-                offerCard(offer)
-            }
-        }
-        .animation(.easeInOut(duration: 0.25), value: model.skipSegment == nil)
-        // A null offer means today's behaviour: the file ends, nothing happens.
-        // Both edges matter: the advisor costs four round trips and can
-        // easily answer AFTER a short episode has run out, and watching only
-        // reachedEnd would drop the card on exactly the slow servers that
-        // need it most.
-        .onChange(of: model.reachedEnd) { _, ended in
-            if ended, model.nextSeasonOffer != nil, !offerDismissed {
-                showOffer = true
-            }
-        }
-        .onChange(of: model.nextSeasonOffer == nil) { _, isNil in
-            if !isNil, model.reachedEnd, !offerDismissed {
-                showOffer = true
-            }
         }
         #if os(tvOS)
         // While an overlay is open the Focus Engine must own the arrows:
-        // the outer view stops being focusable and stops intercepting moves
-        // `offerSent` is deliberately excluded: the confirmation has no
-        // button, so the root has to be focusable again or the remote is
-        // dead for the two seconds it is up — Menu included.
-        .focusable(!showTracks && !(showOffer && !offerSent))
+        // this layer stops being focusable, and — because it is no longer
+        // an ancestor of the overlays — stops swallowing their moves.
+        // A card with no button left is the exception: the "requested"
+        // confirmation has none, so this has to be focusable again or the
+        // remote is dead for the two seconds it is up.
+        .focusable(!showTracks && !(showOffer && endCardHasButtons))
         .onPlayPauseCommand { model.togglePause() }
         .onMoveCommand { direction in
             guard !showTracks, !showOffer else { return }
@@ -630,8 +748,8 @@ struct PlayerScreen: View {
             case .right: model.seek(to: model.timePos + 10)
             case .down:
                 // Only open the panel when it has something to show: an
-                // empty panel renders no focusable button, and with the
-                // outer view .focusable(false) the Focus Engine would have
+                // empty panel renders no focusable button, and with this
+                // layer .focusable(false) the Focus Engine would have
                 // nowhere to land — the user must never end up stuck
                 if model.audioTracks.count > 1 || !model.subtitleTracks.isEmpty {
                     showTracks = true
@@ -639,59 +757,86 @@ struct PlayerScreen: View {
             default: break
             }
         }
-        .onExitCommand {
-            // Menu closes whatever sits on top of the video, innermost
-            // first. Quitting the player instead would throw the viewer out
-            // of the episode for pressing the one obvious "go back" key.
-            if showOffer {
-                dismissOffer()
-            } else if showTracks {
-                showTracks = false
-            } else {
-                dismiss()
-            }
-        }
-        // The pill grabs focus on appear so one center press skips; when it
-        // leaves, focus falls back to the player view (arrows seek again).
-        // Never steal focus while another overlay is open — the pill is
-        // hidden then, and re-grabs when that overlay closes mid-segment.
-        .onChange(of: model.skipSegment == nil) { _, isNil in
-            skipFocused = !isNil && !showTracks && !showOffer
-        }
-        .onChange(of: showTracks) { _, open in
-            if !open && !showOffer && model.skipSegment != nil {
-                skipFocused = true
-            }
-        }
-        .onChange(of: showOffer) { _, up in
-            if up {
-                offerFocus = .primary
-            } else if model.skipSegment != nil {
-                skipFocused = true
-            }
-        }
         #endif
-        .onDisappear { model.shutdown() }
     }
 
-    // MARK: - End-of-episode offer
+    // MARK: - End-of-episode card
+
+    /// Anything worth putting on screen when the file runs out.
+    private var hasEndCard: Bool {
+        model.nextEpisodeOffer != nil || model.nextSeasonOffer != nil
+    }
+
+    /// False only for the "requested" confirmation, which has no button —
+    /// and so must hand the remote back to the root view.
+    private var endCardHasButtons: Bool {
+        model.nextEpisodeOffer != nil || !offerSent
+    }
+
+    private func raiseEndCard() {
+        if model.reachedEnd, hasEndCard, !offerDismissed { showOffer = true }
+    }
 
     /**
-     The card the player shows when an episode runs out and the next season
-     is only a request away.
-
-     Every button here dismisses the card and nothing else: the player stays
-     exactly where it is, on the last frame, and the viewer leaves the way
-     they always do. Same contract as the Android card.
+     Counting down means deciding for the viewer, which is only fair when
+     the card is not also asking them something. With a season to request
+     on it, the card waits: auto-playing out from under a question is how a
+     feature gets switched off for good.
      */
-    private func offerCard(_ offer: NextSeasonOffer) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(offerSent ? "Requested — it'll appear once it downloads." : offer.title)
-                .font(.headline)
-                .foregroundStyle(.white)
+    private var countsDown: Bool {
+        model.settings.autoPlayNextEpisode
+            && model.nextEpisodeOffer != nil
+            && model.nextSeasonOffer == nil
+    }
 
-            if !offerSent {
-                Text(offer.body)
+    /**
+     The card the player shows when an episode runs out.
+
+     One card, never two. The next episode and a missing next season are
+     separate questions that arrive together at the end of a season's
+     second-to-last episode, and two overlays fighting over the Focus
+     Engine is exactly how a remote ends up pointing at nothing. So the
+     episode leads — it is the immediate thing — and the season request
+     rides along as a second button rather than losing the one episode of
+     lead time a download needs.
+
+     Every button dismisses the card and nothing else, except the one that
+     starts the next episode: the player stays where it is, on the last
+     frame, and the viewer leaves the way they always do. Same contract as
+     the Android card.
+     */
+    private func endCard(next: NextEpisodeOffer?, season: NextSeasonOffer?) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let next {
+                Text(next.heading)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                Text(next.label)
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.75))
+                if let season {
+                    Text(
+                        offerSent
+                            ? "Season \(season.seasonNumber) requested — it'll appear once it downloads."
+                            : season.title
+                    )
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.75))
+                }
+                if let countdown {
+                    Text("Playing in \(countdown)s")
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.75))
+                }
+            } else if offerSent {
+                Text("Requested — it'll appear once it downloads.")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+            } else if let season {
+                Text(season.title)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                Text(season.body)
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.75))
             }
@@ -707,38 +852,7 @@ struct PlayerScreen: View {
                     .foregroundStyle(.red)
             }
 
-            // ONE primary button whose label and action change, never a
-            // branch that swaps one button for another.
-            //
-            // Branching looked equivalent and was not: SwiftUI gives each
-            // branch its own identity, so "Request season 2" was destroyed
-            // and "Close" created in its place. The Focus Engine had
-            // nothing to fall back to — the root is not focusable while
-            // the card is up — and the new button drew a focus ring it did
-            // not own. The card looked perfectly normal and ignored every
-            // press. Found on the tvOS simulator; two attempts to fix it
-            // by moving focus around made it worse, because the problem
-            // was never the focus value.
-            // Nothing to press once it is sent: the confirmation says its
-            // piece and goes. A button there would be a button whose only
-            // job is to dismiss something that was already leaving.
-            if !offerSent {
-                HStack(spacing: 16) {
-                    offerPrimaryButton(primaryTitle(for: offer)) {
-                        if offer.alreadyRequested {
-                            dismissOffer()
-                        } else {
-                            requestNextSeason(offer)
-                        }
-                    }
-                    .disabled(offerBusy)
-
-                    if !offer.alreadyRequested {
-                        offerSecondaryButton("Not now") { dismissOffer() }
-                    }
-                }
-                .padding(.top, 4)
-            }
+            endCardButtons(next: next, season: season)
         }
         #if os(tvOS)
         .padding(40)
@@ -750,6 +864,102 @@ struct PlayerScreen: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         .padding(24)
+        // Runs while the card is up and is cancelled the moment it leaves,
+        // which is every way out of here: Not now, Menu, or the swap to the
+        // next episode.
+        .task {
+            guard countsDown, let next = model.nextEpisodeOffer else { return }
+            var remaining = Int(NextEpisode.shared.AUTOPLAY_SECONDS)
+            countdown = remaining
+            while remaining > 0 {
+                // Task.sleep throws on cancellation and `try?` would eat
+                // it, leaving the countdown running over a dead view
+                do {
+                    try await Task.sleep(nanoseconds: 1_000_000_000)
+                } catch {
+                    return
+                }
+                remaining -= 1
+                countdown = remaining
+            }
+            playNext(next)
+        }
+    }
+
+    /**
+     ONE button per job, whose label and action change — never a branch
+     that swaps one button for another.
+
+     Branching looked equivalent and was not: SwiftUI gives each branch its
+     own identity, so "Request season 2" was destroyed and "Close" created
+     in its place. The Focus Engine had nothing to fall back to — the root
+     is not focusable while the card is up — and the new button drew a
+     focus ring it did not own. The card looked perfectly normal and
+     ignored every press. Found on the tvOS simulator; two attempts to fix
+     it by moving focus around made it worse, because the problem was never
+     the focus value.
+     */
+    @ViewBuilder
+    private func endCardButtons(next: NextEpisodeOffer?, season: NextSeasonOffer?) -> some View {
+        if let next {
+            #if os(tvOS)
+            HStack(spacing: 16) { upNextActions(next: next, season: season) }
+                .padding(.top, 4)
+            #else
+            // Three actions fit side by side across a room and do not on a
+            // phone held upright, where the third one gets squeezed into an
+            // unreadable column. Only ever one of these is in the
+            // hierarchy, so there is no duplicate to keep in step.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 16) { upNextActions(next: next, season: season) }
+                VStack(alignment: .leading, spacing: 12) {
+                    upNextActions(next: next, season: season)
+                }
+            }
+            .padding(.top, 4)
+            #endif
+        } else if let season, !offerSent {
+            // Nothing to press once it is sent: the confirmation says its
+            // piece and goes. A button there would be a button whose only
+            // job is to dismiss something that was already leaving.
+            HStack(spacing: 16) {
+                offerButton(primaryTitle(for: season), isPrimary: true, focus: .primary) {
+                    if season.alreadyRequested {
+                        dismissOffer()
+                    } else {
+                        requestNextSeason(season)
+                    }
+                }
+
+                if !season.alreadyRequested {
+                    offerButton("Not now", isPrimary: false, focus: .secondary) { dismissOffer() }
+                }
+            }
+            .padding(.top, 4)
+        }
+    }
+
+    /// The up-next card's actions, laid out by the caller.
+    @ViewBuilder
+    private func upNextActions(next: NextEpisodeOffer, season: NextSeasonOffer?) -> some View {
+        offerButton("Play now", isPrimary: true, focus: .primary) { playNext(next) }
+
+        // Pressing it again is harmless — Jellyseerr answers "already
+        // requested", which reads the same to the viewer. That is why the
+        // label changes instead of the button disappearing, and why
+        // nothing here is ever disabled: a focused button that greys out
+        // mid-request hands the remote to whatever happens to be next.
+        if let season, !season.alreadyRequested {
+            offerButton(
+                offerSent ? "Requested" : "Request season \(season.seasonNumber)",
+                isPrimary: false,
+                focus: .secondary
+            ) {
+                requestNextSeason(season)
+            }
+        }
+
+        offerButton("Not now", isPrimary: false, focus: .tertiary) { dismissOffer() }
     }
 
     private func primaryTitle(for offer: NextSeasonOffer) -> String {
@@ -759,42 +969,25 @@ struct PlayerScreen: View {
 
     // tvOS buttons stay unstyled so the system focus ring is the affordance;
     // anything drawn here would fight it (same call as the season pills).
-    private func offerPrimaryButton(
+    private func offerButton(
         _ title: String,
+        isPrimary: Bool,
+        focus: OfferButton,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             Text(title)
                 .font(.headline)
                 #if !os(tvOS)
-                .padding(.horizontal, 18)
+                .padding(.horizontal, isPrimary ? 18 : 14)
                 .padding(.vertical, 10)
-                .background(.white, in: RoundedRectangle(cornerRadius: 10))
-                .foregroundStyle(.black)
+                .background(isPrimary ? AnyShapeStyle(.white) : AnyShapeStyle(.clear),
+                            in: RoundedRectangle(cornerRadius: 10))
+                .foregroundStyle(isPrimary ? .black : .white)
                 #endif
         }
         #if os(tvOS)
-        .focused($offerFocus, equals: .primary)
-        #else
-        .buttonStyle(.plain)
-        #endif
-    }
-
-    private func offerSecondaryButton(
-        _ title: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.headline)
-                #if !os(tvOS)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .foregroundStyle(.white)
-                #endif
-        }
-        #if os(tvOS)
-        .focused($offerFocus, equals: .secondary)
+        .focused($offerFocus, equals: focus)
         #else
         .buttonStyle(.plain)
         #endif
@@ -803,14 +996,23 @@ struct PlayerScreen: View {
     private func dismissOffer() {
         showOffer = false
         offerNotice = nil
+        countdown = nil
         // Sticky, like the Android twin: dismissed once means dismissed for
         // this playback. A card that comes back is the thing people learn
         // to hate.
         offerDismissed = true
     }
 
+    /// Hands the next episode to the parent, which rebuilds the player
+    /// around it. This view is on its way out from here.
+    private func playNext(_ offer: NextEpisodeOffer) {
+        countdown = nil
+        showOffer = false
+        onPlayNext(offer.episode)
+    }
+
     private func requestNextSeason(_ offer: NextSeasonOffer) {
-        guard let seerr = model.seerr else { return }
+        guard let seerr = model.seerr, !offerBusy else { return }
         offerBusy = true
         Task {
             // Kotlin List<Int> crosses as [KotlinInt]; one season, not the show
@@ -825,14 +1027,18 @@ struct PlayerScreen: View {
                 // coming either way, and saying so twice helps nobody
                 offerNotice = nil
                 offerSent = true
-                // Says its piece and goes: two seconds is long enough to
-                // read one sentence and short enough that nobody reaches
-                // for the remote to get rid of it. No button, so no focus
-                // to juggle — which is also what finally killed the tvOS
-                // dead-remote bug rather than papering over it.
-                Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 2_000_000_000)
-                    if offerSent { dismissOffer() }
+                // With nothing else on it, the card says its piece and
+                // goes: two seconds is long enough to read one sentence
+                // and short enough that nobody reaches for the remote to
+                // get rid of it. No button, so no focus to juggle — which
+                // is what finally killed the tvOS dead-remote bug rather
+                // than papering over it. A card that still has an episode
+                // to play stays: it has not finished its job.
+                if model.nextEpisodeOffer == nil {
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 2_000_000_000)
+                        if offerSent { dismissOffer() }
+                    }
                 }
             case is RequestOutcome.NotSignedIn:
                 offerNotice = "Sign in to Jellyseerr again in Settings"
