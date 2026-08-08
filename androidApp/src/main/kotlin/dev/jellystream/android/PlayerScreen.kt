@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
@@ -70,6 +71,9 @@ import dev.jellystream.shared.BaseItem
 import dev.jellystream.shared.JellyfinApi
 import dev.jellystream.shared.JellyseerrApi
 import dev.jellystream.shared.MediaSegment
+import dev.jellystream.shared.NextEpisode
+import dev.jellystream.shared.NextEpisodeAdvisor
+import dev.jellystream.shared.NextEpisodeOffer
 import dev.jellystream.shared.NextSeasonAdvisor
 import dev.jellystream.shared.NextSeasonOffer
 import dev.jellystream.shared.PlaybackPlan
@@ -177,6 +181,7 @@ fun PlayerScreen(
     seerr: JellyseerrApi,
     item: BaseItem,
     onClose: () -> Unit,
+    onPlayNext: (BaseItem) -> Unit,
 ) {
     var plan by remember { mutableStateOf<PlaybackPlan?>(null) }
     // Seeded from the profile's settings; the Direct Play failure path can
@@ -186,6 +191,7 @@ fun PlayerScreen(
     var failed by remember { mutableStateOf(false) }
     var segments by remember { mutableStateOf<List<MediaSegment>>(emptyList()) }
     var nextSeason by remember { mutableStateOf<NextSeasonOffer?>(null) }
+    var nextEpisode by remember { mutableStateOf<NextEpisodeOffer?>(null) }
 
     LaunchedEffect(item.id, forceTranscode) {
         plan = api.getPlaybackPlan(item, forceTranscode)
@@ -204,6 +210,20 @@ fun PlayerScreen(
     LaunchedEffect(item.id) {
         nextSeason = try {
             NextSeasonAdvisor(api, seerr).offerAfter(item)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    // Which episode follows this one, asked at the same moment and for the
+    // same reason. Its own effect rather than a step of the one above: the
+    // two answers are independent, and a Jellyseerr that hangs must not
+    // cost the offer that needs nothing but Jellyfin.
+    LaunchedEffect(item.id) {
+        nextEpisode = try {
+            NextEpisodeAdvisor(api).after(item)
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
@@ -239,6 +259,8 @@ fun PlayerScreen(
                     plan = currentPlan,
                     segments = segments,
                     offer = nextSeason,
+                    nextEpisode = nextEpisode,
+                    onPlayNext = onPlayNext,
                     onDirectPlayFailed = {
                         if (!currentPlan.isTranscode && !forceTranscode) {
                             forceTranscode = true
@@ -270,6 +292,8 @@ private fun PlayerSurface(
     plan: PlaybackPlan,
     segments: List<MediaSegment>,
     offer: NextSeasonOffer?,
+    nextEpisode: NextEpisodeOffer?,
+    onPlayNext: (BaseItem) -> Unit,
     onDirectPlayFailed: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -514,11 +538,13 @@ private fun PlayerSurface(
 
         // Last child of the box on purpose: it belongs over the video, the
         // controls and the skip pill.
-        val endOfSeason = offer
-        if (playbackEnded && endOfSeason != null && !offerDismissed) {
-            NextSeasonCard(
-                offer = endOfSeason,
+        if (playbackEnded && (nextEpisode != null || offer != null) && !offerDismissed) {
+            EndOfEpisodeCard(
+                nextEpisode = nextEpisode,
+                offer = offer,
+                autoPlay = settings.autoPlayNextEpisode,
                 seerr = seerr,
+                onPlayNext = onPlayNext,
                 onDismiss = { offerDismissed = true },
             )
         }
@@ -526,19 +552,30 @@ private fun PlayerSurface(
 }
 
 /**
- * The offer at the end of an episode, over the paused video.
+ * What the player puts up when an episode runs out, over the paused video.
+ *
+ * One card, never two. The next episode and the missing next season are
+ * separate questions that happen to arrive together at the end of a
+ * season's second-to-last episode — and two overlays grabbing D-pad focus
+ * in the same frame race, leaving the remote pointing at nothing. So the
+ * episode leads (it is the immediate thing), and the season request rides
+ * along as a second button rather than losing the one episode of lead time
+ * a download needs.
  *
  * Dismissing it leaves the player exactly where it was: someone who says
  * "Not now" wants the credits, not the home screen.
  */
 @Composable
-private fun NextSeasonCard(
-    offer: NextSeasonOffer,
+private fun EndOfEpisodeCard(
+    nextEpisode: NextEpisodeOffer?,
+    offer: NextSeasonOffer?,
+    autoPlay: Boolean,
     seerr: JellyseerrApi,
+    onPlayNext: (BaseItem) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    var sent by remember { mutableStateOf(false) }
+    var requested by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
 
     // Composed only once the card is up, so it registers after the
@@ -546,17 +583,52 @@ private fun NextSeasonCard(
     // leaves playback alone.
     BackHandler(onBack = onDismiss)
 
+    // Counting down means deciding for the viewer, which is only fair when
+    // the card is not also asking them something. With a season to request
+    // on it, the card waits — auto-playing out from under a question is
+    // how a feature gets switched off for good.
+    val countingDown = autoPlay && nextEpisode != null && offer == null
+    var secondsLeft by remember { mutableStateOf(NextEpisode.AUTOPLAY_SECONDS) }
+    LaunchedEffect(countingDown) {
+        if (!countingDown || nextEpisode == null) return@LaunchedEffect
+        while (secondsLeft > 0) {
+            delay(1_000)
+            secondsLeft -= 1
+        }
+        onPlayNext(nextEpisode.episode)
+    }
+
+    fun requestSeason(season: NextSeasonOffer) {
+        scope.launch {
+            val outcome = seerr.requestSeasons(season.seriesTmdbId, listOf(season.seasonNumber))
+            when (outcome) {
+                // Already asked for means the same thing to the viewer as
+                // just asked
+                is RequestOutcome.Sent,
+                is RequestOutcome.AlreadyRequested -> {
+                    message = null
+                    requested = true
+                }
+                is RequestOutcome.NotSignedIn ->
+                    message = "Sign in to Jellyseerr again in Settings"
+                is RequestOutcome.Failed -> message = outcome.message
+            }
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.72f)),
         contentAlignment = Alignment.Center,
     ) {
-        // Says its piece and goes: two seconds is long enough to read one
-        // sentence and short enough that nobody reaches for the remote to
-        // get rid of it.
-        LaunchedEffect(sent) {
-            if (!sent) return@LaunchedEffect
+        // A card with nothing left to offer says its piece and goes: two
+        // seconds is long enough to read one sentence and short enough
+        // that nobody reaches for the remote to get rid of it. A card that
+        // still has an episode to play stays — it has not finished its
+        // job just because a season was requested.
+        LaunchedEffect(requested) {
+            if (!requested || nextEpisode != null) return@LaunchedEffect
             delay(SENT_CARD_MS)
             onDismiss()
         }
@@ -570,23 +642,54 @@ private fun NextSeasonCard(
                 .padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (sent) {
-                Text(
+            when {
+                nextEpisode != null -> {
+                    Text(
+                        nextEpisode.heading,
+                        style = MaterialTheme.typography.titleLarge,
+                        color = CinemaColors.TextPrimary,
+                    )
+                    Text(
+                        nextEpisode.label,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = CinemaColors.TextSecondary,
+                    )
+                    offer?.let { season ->
+                        Text(
+                            if (requested) {
+                                "Season ${season.seasonNumber} requested — it'll appear once it downloads."
+                            } else {
+                                season.title
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = CinemaColors.TextSecondary,
+                        )
+                    }
+                    if (countingDown) {
+                        Text(
+                            "Playing in ${secondsLeft}s",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = CinemaColors.TextSecondary,
+                        )
+                    }
+                }
+                requested -> Text(
                     "Requested — it'll appear once it downloads.",
                     style = MaterialTheme.typography.titleMedium,
                     color = CinemaColors.TextPrimary,
                 )
-            } else {
-                Text(
-                    offer.title,
-                    style = MaterialTheme.typography.titleLarge,
-                    color = CinemaColors.TextPrimary,
-                )
-                Text(
-                    offer.body,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = CinemaColors.TextSecondary,
-                )
+                offer != null -> {
+                    Text(
+                        offer.title,
+                        style = MaterialTheme.typography.titleLarge,
+                        color = CinemaColors.TextPrimary,
+                    )
+                    Text(
+                        offer.body,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = CinemaColors.TextSecondary,
+                    )
+                }
             }
             message?.let {
                 Text(
@@ -595,39 +698,61 @@ private fun NextSeasonCard(
                     color = MaterialTheme.colorScheme.error,
                 )
             }
-            // Nothing to press once it is sent: the confirmation says its
-            // piece and goes (see the effect above). A button there would
-            // be a button whose only job is to dismiss something that was
-            // already leaving.
-            if (!sent) Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+
+            // FlowRow, not Row: three actions fit side by side on a TV and
+            // do not on a phone held upright, where the third one used to
+            // run off the card and print one letter per line.
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 when {
-                    offer.alreadyRequested ->
+                    nextEpisode != null -> {
+                        PlayerCardButton(
+                            label = "Play now",
+                            isPrimary = true,
+                            grabsFocus = true,
+                            onClick = { onPlayNext(nextEpisode.episode) },
+                        )
+                        // Label changes, the button never does: replacing
+                        // a focused button with a different one is what
+                        // left the tvOS card drawing a focus ring it did
+                        // not own, and the D-pad has the same trap.
+                        // Pressing it again is harmless — Jellyseerr
+                        // answers "already requested", which reads the
+                        // same to the viewer.
+                        if (offer != null && !offer.alreadyRequested) {
+                            PlayerCardButton(
+                                label = if (requested) {
+                                    "Requested"
+                                } else {
+                                    "Request season ${offer.seasonNumber}"
+                                },
+                                isPrimary = false,
+                                grabsFocus = false,
+                                onClick = { requestSeason(offer) },
+                            )
+                        }
+                        PlayerCardButton(
+                            "Not now",
+                            isPrimary = false,
+                            grabsFocus = false,
+                            onClick = onDismiss,
+                        )
+                    }
+                    // Nothing to press once it is sent: the confirmation
+                    // says its piece and goes (see the effect above). A
+                    // button there would be a button whose only job is to
+                    // dismiss something that was already leaving.
+                    requested -> Unit
+                    offer != null && offer.alreadyRequested ->
                         PlayerCardButton("OK", isPrimary = true, grabsFocus = true, onClick = onDismiss)
-                    else -> {
+                    offer != null -> {
                         PlayerCardButton(
                             label = "Request season ${offer.seasonNumber}",
                             isPrimary = true,
                             grabsFocus = true,
-                            onClick = {
-                                scope.launch {
-                                    val outcome = seerr.requestSeasons(
-                                        offer.seriesTmdbId,
-                                        listOf(offer.seasonNumber),
-                                    )
-                                    when (outcome) {
-                                        // Already asked for means the same
-                                        // thing to the viewer as just asked
-                                        is RequestOutcome.Sent,
-                                        is RequestOutcome.AlreadyRequested -> {
-                                            message = null
-                                            sent = true
-                                        }
-                                        is RequestOutcome.NotSignedIn ->
-                                            message = "Sign in to Jellyseerr again in Settings"
-                                        is RequestOutcome.Failed -> message = outcome.message
-                                    }
-                                }
-                            },
+                            onClick = { requestSeason(offer) },
                         )
                         PlayerCardButton("Not now", isPrimary = false, grabsFocus = false, onClick = onDismiss)
                     }
