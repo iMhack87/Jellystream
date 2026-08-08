@@ -11,6 +11,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -74,7 +75,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import dev.jellystream.shared.AnnouncedArrivals
 import dev.jellystream.shared.AppSettings
+import dev.jellystream.shared.Arrivals
 import dev.jellystream.shared.BaseItem
 import dev.jellystream.shared.DownloadAvailability
 import dev.jellystream.shared.DownloadedItem
@@ -82,7 +85,10 @@ import dev.jellystream.shared.JellyfinApi
 import dev.jellystream.shared.JellyseerrApi
 import dev.jellystream.shared.PersistedProfiles
 import dev.jellystream.shared.PersistedSession
+import dev.jellystream.shared.RequestedTitle
 import dev.jellystream.shared.UserSession
+import dev.jellystream.shared.Watchlist
+import dev.jellystream.shared.WatchlistEntry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -94,10 +100,29 @@ class MainActivity : ComponentActivity() {
         setContent {
             JellystreamTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    // Keep content clear of status bar, cutout AND keyboard (IME):
-                    // the centered login form deliberately shifts up when typing
-                    Box(modifier = Modifier.safeDrawingPadding()) {
-                        JellystreamApp()
+                    // Owned here, above everything: the app drops its whole
+                    // signed-in subtree on a profile switch, and a notice
+                    // living in there would go with it
+                    val arrivals = remember { ArrivalCenter() }
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        // Keep content clear of status bar, cutout AND keyboard (IME):
+                        // the centered login form deliberately shifts up when typing
+                        Box(modifier = Modifier.safeDrawingPadding()) {
+                            JellystreamApp(arrivals)
+                        }
+                        // Sibling of the padded box, not a child: that
+                        // padding includes the IME inset, and a notice
+                        // inside it jumps up the screen when a keyboard
+                        // opens. Last child, so it sits over the player.
+                        // Top-right, not bottom: the bottom of the player
+                        // is its transport bar, and a notice landing on
+                        // the subtitle and settings buttons hides exactly
+                        // what someone reaches for mid-episode. Matches
+                        // where the Apple twin puts it.
+                        ArrivalToastHost(
+                            center = arrivals,
+                            modifier = Modifier.align(Alignment.TopEnd),
+                        )
                     }
                 }
             }
@@ -142,7 +167,7 @@ private class SessionStore(context: Context) {
 }
 
 @Composable
-private fun JellystreamApp() {
+private fun JellystreamApp(arrivals: ArrivalCenter) {
     val context = LocalContext.current
     val store = remember { SessionStore(context) }
     val settingsStore = remember { SettingsStore(context) }
@@ -162,6 +187,7 @@ private fun JellystreamApp() {
             key(current.profileKey) {
                 SignedInApp(
                     profile = current,
+                    arrivals = arrivals,
                     settings = storedSettings.forProfile(current.profileKey),
                     onSettingsChange = {
                         storedSettings = storedSettings
@@ -226,6 +252,7 @@ private fun JellystreamApp() {
 @Composable
 private fun SignedInApp(
     profile: PersistedSession,
+    arrivals: ArrivalCenter,
     settings: AppSettings,
     onSettingsChange: (AppSettings) -> Unit,
     onProfileChange: (PersistedSession) -> Unit,
@@ -248,12 +275,61 @@ private fun SignedInApp(
     var downloadingAllowed by remember { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(profile.profileKey) { downloadingAllowed = api.canDownload() }
 
+    // One list per profile, held here rather than by a screen: search,
+    // detail and the home row all read and write the same one
+    val watchlistStore = remember { WatchlistStore(context, profile.profileKey) }
+    var watchlist by remember { mutableStateOf(watchlistStore.load()) }
+    fun changeWatchlist(updated: Watchlist) {
+        watchlist = updated.also(watchlistStore::save)
+    }
+
     val seerr = remember { JellyseerrApi() }
     // Re-read on every change: pointing at another server or signing in
     // must take effect without restarting the app
     LaunchedEffect(profile.jellyseerr) {
         seerr.configure(profile.jellyseerr?.baseUrl, profile.jellyseerr?.sessionCookie)
     }
+
+    // Declared AFTER the configure effect on purpose: effects start in
+    // declaration order and configure() does not suspend, so the first
+    // poll already knows which server to ask.
+    val arrivalStore = remember { ArrivalStore(context, profile.profileKey) }
+    LaunchedEffect(profile.jellyseerr) {
+        // Nothing stored means this profile has never been polled. Every
+        // title already available then was not waited for by anyone, so
+        // the first look records them silently.
+        var firstLook = arrivalStore.load() == null
+        while (true) {
+            if (seerr.isConfigured) {
+                try {
+                    val requests = seerr.myRequestsDetailed(REQUEST_PAGE)
+                    // Null is "could not reach the request server", never
+                    // "you have no requests" — taking it for the latter
+                    // would forget every announced id and re-announce the
+                    // lot on the next tick that does answer.
+                    if (requests != null) {
+                        val announced = arrivalStore.load() ?: AnnouncedArrivals()
+                        arrivals.announce(Arrivals.landed(requests, announced, firstLook))
+                        arrivalStore.save(Arrivals.seen(requests, announced))
+                        firstLook = false
+                        // The home row reads this rather than fetching its
+                        // own copy: one poll, one truth. Otherwise the
+                        // notice says a title has arrived while the row
+                        // under it still says 0% — which is what shipped
+                        // before this line existed.
+                        arrivals.requests = requests
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    // One unreachable tick is not worth ending the poll
+                    // over; the next one asks again
+                }
+            }
+            delay(ARRIVAL_POLL_MS)
+        }
+    }
+
     var playing by remember { mutableStateOf<BaseItem?>(null) }
     var playingOffline by remember { mutableStateOf<DownloadedItem?>(null) }
     val backStack = remember { mutableStateListOf<Screen>(Screen.Home) }
@@ -300,7 +376,11 @@ private fun SignedInApp(
             when (val screen = backStack.last()) {
                 Screen.Home -> HomeScreen(
                     api = api,
+                    seerr = seerr,
+                    arrivals = arrivals,
                     session = profile.session,
+                    watchlist = watchlist,
+                    onWatchlistChange = ::changeWatchlist,
                     onOpen = ::open,
                     onPlay = { playing = it },
                     onSearch = { backStack.add(Screen.Search) },
@@ -314,6 +394,8 @@ private fun SignedInApp(
                     screen.item,
                     onPlay = { playing = it },
                     onBack = ::goBack,
+                    watchlist = watchlist,
+                    onWatchlistChange = ::changeWatchlist,
                     download = DownloadAvailability.of(screen.item, downloadingAllowed),
                     downloadState = downloads.stateOf(screen.item.id),
                     onDownload = {
@@ -327,8 +409,17 @@ private fun SignedInApp(
                     screen.item,
                     onPlay = { playing = it },
                     onBack = ::goBack,
+                    watchlist = watchlist,
+                    onWatchlistChange = ::changeWatchlist,
                 )
-                Screen.Search -> SearchScreen(api, onOpen = ::open, onBack = ::goBack)
+                Screen.Search -> SearchScreen(
+                    api = api,
+                    seerr = seerr,
+                    watchlist = watchlist,
+                    onWatchlistChange = ::changeWatchlist,
+                    onOpen = ::open,
+                    onBack = ::goBack,
+                )
                 Screen.Requests -> RequestsScreen(seerr, onBack = ::goBack)
                 Screen.Downloads -> DownloadsScreen(
                     downloads = downloads,
@@ -697,7 +788,11 @@ private data class LibrarySection(val title: String, val key: String, val items:
 @Composable
 private fun HomeScreen(
     api: JellyfinApi,
+    seerr: JellyseerrApi,
+    arrivals: ArrivalCenter,
     session: UserSession,
+    watchlist: Watchlist,
+    onWatchlistChange: (Watchlist) -> Unit,
     onOpen: (BaseItem) -> Unit,
     onPlay: (BaseItem) -> Unit,
     onSearch: () -> Unit,
@@ -731,6 +826,76 @@ private fun HomeScreen(
         } catch (e: Exception) {
             error = e.message ?: "Failed to load library"
         }
+    }
+
+    // The three rows below load OUTSIDE that effect, each with its own
+    // state. The load above assigns `sections` only at the very end, so
+    // folding a Jellyseerr call into it would make the whole home screen
+    // — hero included — wait on the request server, and block on its
+    // timeout every time the NAS is off.
+    // Read from the app-wide arrival poll rather than fetched again here.
+    // Two fetches meant two answers, and the one that showed was the older:
+    // the notice announced a title while the row under it still said 0%.
+    // This also keeps the row moving without a second poll of its own.
+    var arriving by remember { mutableStateOf<List<RequestedTitle>>(emptyList()) }
+    LaunchedEffect(arrivals.requests) {
+        if (!seerr.isConfigured) return@LaunchedEffect
+        if (arrivals.requests.isNotEmpty()) {
+            arriving = arrivals.requests.filter { it.isSettling }
+            return@LaunchedEffect
+        }
+        // Nothing polled yet — the poll runs every minute and the home
+        // screen is usually the first thing seen, so ask once rather than
+        // show an empty row for up to a minute.
+        try {
+            seerr.myRequestsDetailed(REQUEST_PAGE)
+                ?.let { rows -> arriving = rows.filter { it.isSettling } }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // No row is better than a home screen that says it failed
+        }
+    }
+
+    var favorites by remember { mutableStateOf<List<BaseItem>>(emptyList()) }
+    LaunchedEffect(Unit) {
+        favorites = try {
+            api.getFavorites(24)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    // A watchlist entry carries no Jellyfin image tag, and without one
+    // there is no poster URL to build — so the ones already on the server
+    // are fetched. It is also what makes the card openable at all.
+    var onServer by remember { mutableStateOf<Map<String, BaseItem>>(emptyMap()) }
+    LaunchedEffect(watchlist) {
+        val resolved = mutableMapOf<String, BaseItem>()
+        for (entry in watchlist.entries) {
+            val id = entry.itemId ?: continue
+            try {
+                resolved[id] = api.getItem(id)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // One title the server will not describe costs its
+                // poster, not the row
+            }
+        }
+        onServer = resolved
+    }
+
+    // An entry added from search knows only a TMDb id, and nothing here
+    // can open one of those. Reconcile against everything already loaded
+    // so it picks up an item id the moment the download lands.
+    LaunchedEffect(sections, favorites, watchlist) {
+        val known = sections.orEmpty().flatMap { it.items } + favorites
+        if (known.isEmpty()) return@LaunchedEffect
+        val reconciled = watchlist.reconciled(known)
+        if (reconciled != watchlist) onWatchlistChange(reconciled)
     }
 
     when {
@@ -807,12 +972,42 @@ private fun HomeScreen(
                             onPlay = onPlay,
                         )
                     }
-                    items(sections!!, key = { it.key }) { section ->
-                        if (section.key == "resume" || section.key == "nextup") {
-                            ContinueRow(api, section, onOpen)
-                        } else {
-                            LibraryRow(api, section, onOpen)
+                    // Split rather than dispatched on the key: the three
+                    // rows below have to land BETWEEN Next Up and the
+                    // libraries, and none of them holds BaseItems only.
+                    items(
+                        sections!!.filter { it.key == "resume" || it.key == "nextup" },
+                        key = { it.key },
+                    ) { section ->
+                        ContinueRow(api, section, onOpen)
+                    }
+                    if (arriving.isNotEmpty()) {
+                        item(key = "arriving") { ArrivingRow(arriving) }
+                    }
+                    if (watchlist.entries.isNotEmpty()) {
+                        item(key = "watchlist") {
+                            WatchlistRow(
+                                api = api,
+                                entries = watchlist.entries,
+                                onServer = onServer,
+                                onOpen = onOpen,
+                            )
                         }
+                    }
+                    if (favorites.isNotEmpty()) {
+                        item(key = "favorites") {
+                            LibraryRow(
+                                api,
+                                LibrarySection("Favourites", "favorites", favorites),
+                                onOpen,
+                            )
+                        }
+                    }
+                    items(
+                        sections!!.filter { it.key != "resume" && it.key != "nextup" },
+                        key = { it.key },
+                    ) { section ->
+                        LibraryRow(api, section, onOpen)
                     }
                 }
                 // Sibling of the list, not a hero child: inside the hero's
@@ -1041,6 +1236,122 @@ private fun ContinueRow(api: JellyfinApi, section: LibrarySection, onOpen: (Base
                             )
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * What has been asked for and is not here yet.
+ *
+ * Not a [LibrarySection]: a request is a [RequestedTitle], it has a state
+ * and a progress bar and no Jellyfin item behind it at all. There is
+ * nothing to open either — the cards are focusable only so the D-pad can
+ * reach the row and read it, never clickable.
+ */
+@Composable
+private fun ArrivingRow(requests: List<RequestedTitle>) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(
+            "Requested & on the way",
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.padding(horizontal = 20.dp),
+        )
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            items(requests, key = { "arriving-${it.request.id}" }) { row ->
+                Column(
+                    modifier = Modifier
+                        .width(132.dp)
+                        .dpadFocusEffect(RoundedCornerShape(10.dp))
+                        .focusable(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    PosterThumb(row.posterPath, width = 132.dp, height = 198.dp)
+                    Text(
+                        row.displayTitle,
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        row.state.label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = CinemaColors.TextSecondary,
+                    )
+                    row.progress?.let { ProgressStrip(it) }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Things meant for later, whether or not the server has them.
+ *
+ * An entry with no item id is shown and not playable — that is the whole
+ * point of the list, and hiding it until the download lands would mean
+ * the row forgets what it was asked to remember.
+ */
+@Composable
+private fun WatchlistRow(
+    api: JellyfinApi,
+    entries: List<WatchlistEntry>,
+    onServer: Map<String, BaseItem>,
+    onOpen: (BaseItem) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(
+            "Watchlist",
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.padding(horizontal = 20.dp),
+        )
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            items(
+                entries,
+                key = { it.itemId ?: "tmdb-${it.tmdbId}" },
+            ) { entry ->
+                val item = entry.itemId?.let { onServer[it] }
+                Column(
+                    modifier = Modifier
+                        .width(132.dp)
+                        .dpadFocusEffect(RoundedCornerShape(10.dp))
+                        .then(
+                            if (item != null) {
+                                Modifier.clickable { onOpen(item) }
+                            } else {
+                                Modifier.focusable()
+                            }
+                        ),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    PosterTile(
+                        item?.let { api.imageUrl(it, 342) }
+                            ?: JellyseerrApi.posterUrl(entry.posterPath, 342),
+                        width = 132.dp,
+                        height = 198.dp,
+                    )
+                    Text(
+                        entry.title,
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        // Says why a card does nothing when pressed,
+                        // instead of leaving it looking broken
+                        if (item != null) entry.year.orEmpty() else "Not on the server yet",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = CinemaColors.TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
         }

@@ -258,9 +258,14 @@ class Handler(BaseHTTPRequestHandler):
         self._json(user_data(m.group(2)))
         return True
 
-    def _all_items(self):
-        """Everything searchable: the films and the show, never episodes."""
-        return [dto(i) for i in ITEMS] + [series_dto(with_provider_ids=False)]
+    def _all_items(self, with_provider_ids=False):
+        """Everything searchable: the films and the show, never episodes.
+
+        ProviderIds only when `fields` asks for it, exactly as real
+        Jellyfin behaves — which is what lets the unified search match a
+        library title to a Jellyseerr one by id instead of by name.
+        """
+        return [dto(i) for i in ITEMS] + [series_dto(with_provider_ids)]
 
     def do_GET(self):
         path = self.path.split("?")[0]
@@ -311,7 +316,8 @@ class Handler(BaseHTTPRequestHandler):
         # single-item route below claims the path.
         if re.match(r"^/(Users/[^/]+/)?Items$", path):
             query = self._query()
-            items = self._all_items()
+            wants_ids = "ProviderIds" in query.get("fields", [""])[0]
+            items = self._all_items(with_provider_ids=wants_ids)
             if "IsFavorite" in query.get("filters", [""])[0]:
                 items = [i for i in items if i["UserData"]["IsFavorite"]]
             term = (query.get("searchTerm", [""])[0] or "").lower()

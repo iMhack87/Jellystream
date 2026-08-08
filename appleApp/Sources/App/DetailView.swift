@@ -7,6 +7,9 @@ struct DetailView: View {
     let seerr: JellyseerrApi
     @State private var item: BaseItem
     @State private var playingItem: BaseItem?
+    /// A refused flag says so under the buttons and nowhere else — an
+    /// alert over a screen that still works is the wrong trade.
+    @State private var notice: String?
     @Environment(\.appSettings) private var appSettings
     @Environment(\.downloader) private var downloader
     @Environment(\.downloadingAllowed) private var downloadingAllowed
@@ -90,6 +93,14 @@ struct DetailView: View {
                     .buttonStyle(.plain)
                     #endif
 
+                    itemActions
+
+                    if let notice {
+                        Text(notice)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
                     // Offline is a phone and tablet feature: a television
                     // sits on the same network as the server
                     #if !os(tvOS)
@@ -133,6 +144,76 @@ struct DetailView: View {
         }
         .fullScreenCover(item: $playingItem) { playing in
             PlayerScreen(api: api, item: playing, settings: appSettings, seerr: seerr)
+        }
+    }
+
+    /// Favourite, watched, watchlist. The first two are Jellyfin's own
+    /// flags — every other client sees them — and the third is this
+    /// install's list, which is why it can hold what the server lacks.
+    private var itemActions: some View {
+        HStack(spacing: 20) {
+            Button {
+                toggleFavorite()
+            } label: {
+                Image(systemName: item.isFavorite ? "heart.fill" : "heart")
+                    .font(.title3)
+            }
+            #if !os(tvOS)
+            .buttonStyle(.plain)
+            .foregroundStyle(.white)
+            #endif
+            .accessibilityLabel(item.isFavorite ? "Remove favourite" : "Add favourite")
+
+            Button {
+                toggleWatched()
+            } label: {
+                Label(
+                    item.isWatched ? "Mark as unwatched" : "Mark as watched",
+                    systemImage: item.isWatched ? "checkmark.circle.fill" : "checkmark.circle"
+                )
+                .font(.subheadline)
+            }
+            #if !os(tvOS)
+            .buttonStyle(.plain)
+            .foregroundStyle(.white)
+            #endif
+
+            WatchlistButton(entry: WatchlistEntry.companion.of(item: item))
+        }
+    }
+
+    /// Flip the icon first and put it back if the server says no: waiting
+    /// on a round trip makes the button feel broken, and the shared
+    /// module hands us the copy to flip to.
+    private func toggleFavorite() {
+        let wanted = !item.isFavorite
+        let before = item
+        item = item.withFavorite(favorite: wanted)
+        notice = nil
+        Task {
+            // The bridge boxes a Kotlin Boolean; false is also what a thrown
+            // error means here — either way the server did not take it
+            let ok = (try? await api.setFavorite(itemId: before.id, favorite: wanted))?.boolValue ?? false
+            if !ok {
+                item = before
+                notice = "Couldn't reach the server"
+            }
+        }
+    }
+
+    private func toggleWatched() {
+        let wanted = !item.isWatched
+        let before = item
+        // withWatched also clears the resume position, so the Play button
+        // stops offering to resume something just marked as seen
+        item = item.withWatched(watched: wanted)
+        notice = nil
+        Task {
+            let ok = (try? await api.setWatched(itemId: before.id, watched: wanted))?.boolValue ?? false
+            if !ok {
+                item = before
+                notice = "Couldn't reach the server"
+            }
         }
     }
 

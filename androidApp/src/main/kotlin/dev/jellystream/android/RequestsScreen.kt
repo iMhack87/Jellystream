@@ -34,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import dev.jellystream.shared.JellyseerrApi
@@ -48,7 +49,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** How many of "my requests" to carry; more than a screenful already. */
-private const val REQUEST_PAGE = 30
+internal const val REQUEST_PAGE = 30
 
 /** How often a moving download is re-read while the screen is up. */
 private const val PROGRESS_POLL_MS = 5_000L
@@ -233,9 +234,12 @@ fun RequestsScreen(
  * Not a screen in the app's back stack: that stack is private to
  * MainActivity, and an entry there would make the picker and the requests
  * screen answer the same Back press.
+ *
+ * Shared with the unified search screen, which reaches the very same
+ * picker when a series row is asked for — two copies would drift.
  */
 @Composable
-private fun SeasonPicker(
+internal fun SeasonPicker(
     seerr: JellyseerrApi,
     show: JellyseerrResult,
     notice: String?,
@@ -427,7 +431,7 @@ private fun SectionLabel(text: String) {
 
 /** Whatever the last request attempt had to say, on either screen. */
 @Composable
-private fun NoticeCard(message: String) {
+internal fun NoticeCard(message: String) {
     Text(
         message,
         style = MaterialTheme.typography.bodyMedium,
@@ -522,18 +526,29 @@ private fun RequestRow(row: RequestedTitle) {
 }
 
 /**
+ * A Jellyseerr poster path, drawn as a tile.
+ *
+ * TMDb serves a fixed set of widths, so the source is picked from the tile
+ * rather than passed in: w185 is plenty for a list thumb, and asking for
+ * w342 everywhere would triple what a thirty-row request list pulls down.
+ */
+@Composable
+internal fun PosterThumb(posterPath: String?, width: Dp = 64.dp, height: Dp = 96.dp) {
+    PosterTile(JellyseerrApi.posterUrl(posterPath, if (width > 120.dp) 342 else 185), width, height)
+}
+
+/**
  * Poster, or a plain tile when there is none.
  *
  * Coil handed a null model renders its error state, which on a dark row
  * reads as a broken image rather than as "this title has no artwork".
  */
 @Composable
-private fun PosterThumb(posterPath: String?) {
-    val url = JellyseerrApi.posterUrl(posterPath, 185)
+internal fun PosterTile(url: String?, width: Dp = 64.dp, height: Dp = 96.dp) {
     Box(
         modifier = Modifier
-            .width(64.dp)
-            .height(96.dp)
+            .width(width)
+            .height(height)
             .clip(RoundedCornerShape(8.dp))
             .background(CinemaColors.SurfaceVariant),
     ) {
@@ -550,7 +565,7 @@ private fun PosterThumb(posterPath: String?) {
 
 /** How far along the download is: one bar, one line. */
 @Composable
-private fun ProgressStrip(progress: RequestProgress) {
+internal fun ProgressStrip(progress: RequestProgress) {
     Column(
         modifier = Modifier.padding(top = 6.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -587,7 +602,7 @@ private fun ProgressStrip(progress: RequestProgress) {
 
 /** The one place a request state turns into something on screen. */
 @Composable
-private fun StateChip(state: RequestState) {
+internal fun StateChip(state: RequestState) {
     val tint = when (state) {
         RequestState.AVAILABLE -> CinemaColors.CriticFresh
         RequestState.DECLINED -> MaterialTheme.colorScheme.error

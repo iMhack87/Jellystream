@@ -49,6 +49,10 @@ final class AppModel: ObservableObject {
 
     /// Rebuilt per profile: downloads are per account, like settings.
     @Published private(set) var downloader: Downloader?
+
+    /// Rebuilt per profile too: two accounts sharing an iPad do not share
+    /// a watchlist, and one signing out must not take the other's.
+    @Published private(set) var watchlist: WatchlistStore?
     private var deviceId: String
     /// Every profile's settings, including the inactive ones.
     private var storedSettings: PersistedSettings = SettingsStore.load()
@@ -66,6 +70,7 @@ final class AppModel: ObservableObject {
             settings = storedSettings.forProfile(profileKey: only.profileKey)
             activeProfile = only
             downloader = Downloader(api: api, profileKey: only.profileKey)
+            watchlist = WatchlistStore(profileKey: only.profileKey)
             seerr.configure(
                 serverUrl: only.jellyseerr?.baseUrl,
                 sessionCookie: only.jellyseerr?.sessionCookie
@@ -98,7 +103,7 @@ final class AppModel: ObservableObject {
                 .withoutProfile(profile: profile)
             profiles = updated.profiles
             SessionStore.saveProfiles(updated)
-            dropSettings(profileKey: profile.profileKey)
+            dropProfileData(profileKey: profile.profileKey)
         }
         session = nil
         addingProfile = false
@@ -129,6 +134,7 @@ final class AppModel: ObservableObject {
         settings = storedSettings.forProfile(profileKey: profile.profileKey)
         activeProfile = profile
         downloader = Downloader(api: api, profileKey: profile.profileKey)
+        watchlist = WatchlistStore(profileKey: profile.profileKey)
         seerr.configure(
             serverUrl: profile.jellyseerr?.baseUrl,
             sessionCookie: profile.jellyseerr?.sessionCookie
@@ -161,6 +167,17 @@ final class AppModel: ObservableObject {
         storedSettings = storedSettings.withoutProfile(profileKey: profileKey)
         SettingsStore.save(storedSettings)
         settings = AppSettings.companion.defaults()
+    }
+
+    /// Everything this install keeps for one account. Both ways out — the
+    /// deliberate log out and the 401 that kills the session — go through
+    /// here, or one of them leaves a watchlist behind for whoever signs in
+    /// with that account next.
+    private func dropProfileData(profileKey: String) {
+        dropSettings(profileKey: profileKey)
+        WatchlistStore.drop(profileKey: profileKey)
+        ArrivalStore.drop(profileKey: profileKey)
+        watchlist = nil
     }
 
     /// New accounts get a fresh DeviceId — two users sharing one would
@@ -201,6 +218,7 @@ final class AppModel: ObservableObject {
         self.session = session
         // Signing back into a known account restores its preferences
         settings = storedSettings.forProfile(profileKey: profile.profileKey)
+        watchlist = WatchlistStore(profileKey: profile.profileKey)
         addingProfile = false
     }
 
@@ -276,7 +294,7 @@ final class AppModel: ObservableObject {
             let updated = PersistedProfiles(profiles: profiles).withoutProfile(profile: profile)
             profiles = updated.profiles
             SessionStore.saveProfiles(updated)
-            dropSettings(profileKey: profile.profileKey)
+            dropProfileData(profileKey: profile.profileKey)
         }
         session = nil
         addingProfile = false
@@ -357,24 +375,72 @@ struct RootView: View {
     @StateObject private var model = AppModel()
 
     var body: some View {
-        if let session = model.session {
-            HomeView(
-                api: model.api,
-                session: session,
-                settings: model.settings,
-                seerr: model.seerr,
-                downloader: model.downloader,
-                profile: model.activeProfile,
-                onSettingsChange: { model.update(settings: $0) },
-                onProfileChange: { model.update(profile: $0) },
-                onLogout: { model.logout() },
-                onSwitchProfile: { model.switchProfile() }
-            )
-        } else if model.profiles.isEmpty || model.addingProfile {
-            ConnectView(model: model)
-        } else {
-            // Several known accounts and none active — ask who's watching
-            ProfilePickerView(model: model)
+        Group {
+            if let session = model.session {
+                HomeView(
+                    api: model.api,
+                    session: session,
+                    settings: model.settings,
+                    seerr: model.seerr,
+                    downloader: model.downloader,
+                    watchlist: model.watchlist,
+                    profile: model.activeProfile,
+                    onSettingsChange: { model.update(settings: $0) },
+                    onProfileChange: { model.update(profile: $0) },
+                    onLogout: { model.logout() },
+                    onSwitchProfile: { model.switchProfile() }
+                )
+            } else if model.profiles.isEmpty || model.addingProfile {
+                ConnectView(model: model)
+            } else {
+                // Several known accounts and none active — ask who's watching
+                ProfilePickerView(model: model)
+            }
+        }
+        // The notice has to show during playback, and the player is a
+        // fullScreenCover — a UIKit modal above this whole hierarchy. Its
+        // own window is the only placement that survives that.
+        .onAppear { ArrivalToastWindow.shared.install() }
+        .task(id: model.session?.profileKey) { await announceArrivals() }
+    }
+
+    /**
+     The app-wide poll behind the arrival notice.
+
+     Here rather than on the home screen because the home screen is not
+     on screen during playback, which is exactly when something landing
+     is worth saying. One minute is slow enough to be free and fast
+     enough that "it arrived" still feels like news.
+     */
+    private func announceArrivals() async {
+        guard let profileKey = model.session?.profileKey else { return }
+        let seerr = model.seerr
+        while !Task.isCancelled {
+            if seerr.isConfigured {
+                // nil is UNREACHABLE, not "no requests": treating it as an
+                // empty list would forget everything already announced and
+                // then announce it all again on the next successful tick
+                if let requests = try? await seerr.myRequestsDetailed(limit: 30) {
+                    let stored = ArrivalStore.load(profileKey: profileKey)
+                    let announced = stored ?? AnnouncedArrivals(requestIds: [])
+                    // No stored blob = this profile's first look: whatever
+                    // is already available did not arrive while anyone was
+                    // watching, so it is recorded silently
+                    let landed = Arrivals.shared.landed(
+                        requests: requests,
+                        announced: announced,
+                        firstLook: stored == nil
+                    )
+                    ArrivalStore.save(
+                        Arrivals.shared.seen(requests: requests, announced: announced),
+                        profileKey: profileKey
+                    )
+                    for arrival in landed {
+                        ArrivalToastWindow.shared.show(message: arrival.message)
+                    }
+                }
+            }
+            try? await Task.sleep(nanoseconds: 60_000_000_000)
         }
     }
 }
