@@ -62,6 +62,15 @@ struct SeriesView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .task {
+            // Refetch the show itself, as the Android twin does. The item
+            // this screen was handed came off a shelf, and a list DTO
+            // carries neither ProviderIds nor a current favourite flag:
+            // without this the heart starts on the wrong side, and a
+            // watchlist entry made here has no TMDb id to recognise the
+            // same show by later.
+            if let full = try? await api.getItem(itemId: series.id) {
+                series = full
+            }
             do {
                 seasons = try await api.getSeasons(seriesId: series.id)
                 selectedSeason = seasons.first

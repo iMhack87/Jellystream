@@ -58,6 +58,11 @@ class ArrivalStore(context: Context, profileKey: String) {
     fun save(announced: AnnouncedArrivals) {
         prefs.edit().putString(key, announced.toJson()).apply()
     }
+
+    /** Nothing outlives an account the install no longer knows. */
+    fun clear() {
+        prefs.edit().remove(key).apply()
+    }
 }
 
 /**
@@ -88,6 +93,16 @@ class ArrivalCenter {
         internal set
 
     /**
+     * Called once a notice has had its time on screen.
+     *
+     * Recording an id only here, and not when the poll queues it, is what
+     * stops a notice being lost for good: a queue dropped before it ever
+     * appeared — a profile switch, the app killed — would otherwise have
+     * already been written off as announced.
+     */
+    var onShown: ((Arrival) -> Unit)? = null
+
+    /**
      * Forgets everything. Called when the profile changes: this object
      * outlives the signed-in screen on purpose, so without it the next
      * account inherits the last one's queued notices and requests.
@@ -95,6 +110,7 @@ class ArrivalCenter {
     fun reset() {
         pending.clear()
         requests = emptyList()
+        onShown = null
     }
 
     fun announce(arrivals: List<Arrival>) {
@@ -122,6 +138,8 @@ fun ArrivalToastHost(center: ArrivalCenter, modifier: Modifier = Modifier) {
     LaunchedEffect(showing) {
         if (showing == null) return@LaunchedEffect
         delay(ARRIVAL_TOAST_MS)
+        // Written off as announced only now that it has been seen
+        center.onShown?.invoke(showing)
         center.pending.remove(showing)
     }
     if (showing == null) return

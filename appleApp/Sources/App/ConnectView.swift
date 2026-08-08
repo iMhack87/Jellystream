@@ -423,6 +423,7 @@ struct RootView: View {
     private func announceArrivals() async {
         guard let profileKey = model.session?.profileKey else { return }
         let seerr = model.seerr
+        let server = model.activeProfile?.jellyseerr?.baseUrl
         // Both of these outlive the signed-in screen so a notice can paint
         // over the player. Emptying them here is what stops one account's
         // titles being announced to the next, and its requests turning up
@@ -435,22 +436,42 @@ struct RootView: View {
                 // empty list would forget everything already announced and
                 // then announce it all again on the next successful tick
                 if let requests = try? await seerr.myRequestsDetailed(limit: 30) {
-                    let stored = ArrivalStore.load(profileKey: profileKey)
-                    let announced = stored ?? AnnouncedArrivals(requestIds: [])
-                    // No stored blob = this profile's first look: whatever
+                    let stored = ArrivalStore.load(profileKey: profileKey)?
+                        .forServer(server: server)
+                    let announced = stored ?? AnnouncedArrivals(requestIds: [], server: server)
+                    // Nothing stored = this profile's first look: whatever
                     // is already available did not arrive while anyone was
-                    // watching, so it is recorded silently
+                    // watching, so it is recorded silently. A blob from a
+                    // DIFFERENT Jellyseerr counts as nothing: request ids
+                    // are that server's numbering, so replaying them both
+                    // silences real arrivals and invents ones that never
+                    // happened.
                     let landed = Arrivals.shared.landed(
                         requests: requests,
                         announced: announced,
                         firstLook: stored == nil
                     )
                     ArrivalStore.save(
-                        Arrivals.shared.seen(requests: requests, announced: announced),
+                        Arrivals.shared.seen(
+                            requests: requests,
+                            announced: announced,
+                            announcing: landed
+                        ),
                         profileKey: profileKey
                     )
                     for arrival in landed {
-                        ArrivalToastWindow.shared.show(message: arrival.message)
+                        // Written off as announced only once it has been on
+                        // screen: a queue dropped before it appeared would
+                        // otherwise be lost, and nothing raises it again.
+                        ArrivalToastWindow.shared.show(message: arrival.message) {
+                            let now = ArrivalStore.load(profileKey: profileKey)?
+                                .forServer(server: server)
+                                ?? AnnouncedArrivals(requestIds: [], server: server)
+                            ArrivalStore.save(
+                                Arrivals.shared.seenAfterShowing(arrival: arrival, announced: now),
+                                profileKey: profileKey
+                            )
+                        }
                     }
                     // The home row reads this instead of fetching its own
                     // copy: one poll, one truth

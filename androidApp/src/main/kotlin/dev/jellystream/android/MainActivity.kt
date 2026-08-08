@@ -204,10 +204,17 @@ private fun JellystreamApp(arrivals: ArrivalCenter) {
                         profiles = profiles.withoutProfile(current)
                             .also(store::saveProfiles)
                         // Nothing should outlive an account the install no
-                        // longer knows
+                        // longer knows — including the watchlist and the
+                        // record of what has been announced, which would
+                        // otherwise be inherited by whoever signs in with
+                        // that account next. Both ways out come through
+                        // here: the deliberate log out and the 401 that
+                        // kills the session.
                         storedSettings = storedSettings
                             .withoutProfile(current.profileKey)
                             .also(settingsStore::save)
+                        WatchlistStore(context, current.profileKey).clear()
+                        ArrivalStore(context, current.profileKey).clear()
                         addingProfile = false
                         active = null
                     },
@@ -301,10 +308,21 @@ private fun SignedInApp(
         // announced to the next, and its requests appearing on their home
         // screen — the same reason the effect is keyed on the profile.
         arrivals.reset()
+        // A notice counts as announced once it has been on screen, not
+        // when the poll queues it — otherwise a queue dropped before it
+        // appeared is written off and nothing ever raises it again.
+        val server = profile.jellyseerr?.baseUrl
+        arrivals.onShown = { shown ->
+            val stored = arrivalStore.load()?.forServer(server) ?: AnnouncedArrivals(server = server)
+            arrivalStore.save(Arrivals.seenAfterShowing(shown, stored))
+        }
         // Nothing stored means this profile has never been polled. Every
         // title already available then was not waited for by anyone, so
-        // the first look records them silently.
-        var firstLook = arrivalStore.load() == null
+        // the first look records them silently. A blob belonging to a
+        // DIFFERENT Jellyseerr counts as nothing stored: request ids are
+        // that server's numbering, and replaying them against another's
+        // both silences real arrivals and invents ones that never happened.
+        var firstLook = arrivalStore.load()?.server != server
         while (true) {
             if (seerr.isConfigured) {
                 try {
@@ -314,9 +332,11 @@ private fun SignedInApp(
                     // would forget every announced id and re-announce the
                     // lot on the next tick that does answer.
                     if (requests != null) {
-                        val announced = arrivalStore.load() ?: AnnouncedArrivals()
-                        arrivals.announce(Arrivals.landed(requests, announced, firstLook))
-                        arrivalStore.save(Arrivals.seen(requests, announced))
+                        val announced = arrivalStore.load()?.forServer(server)
+                            ?: AnnouncedArrivals(server = server)
+                        val landed = Arrivals.landed(requests, announced, firstLook)
+                        arrivals.announce(landed)
+                        arrivalStore.save(Arrivals.seen(requests, announced, landed))
                         firstLook = false
                         // The home row reads this rather than fetching its
                         // own copy: one poll, one truth. Otherwise the
@@ -1350,9 +1370,18 @@ private fun WatchlistRow(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        // Says why a card does nothing when pressed,
-                        // instead of leaving it looking broken
-                        if (item != null) entry.year.orEmpty() else "Not on the server yet",
+                        // Three states, not two. An entry that HAS an item
+                        // id is on the server — it is only the lookup that
+                        // has not landed yet, and calling that "not on the
+                        // server" is a lie the card tells on every visit
+                        // to the home screen, for as long as the fetch
+                        // takes. Says why a card does nothing when pressed
+                        // only when that is actually the reason.
+                        when {
+                            item != null -> entry.year.orEmpty()
+                            entry.isOnServer -> "Loading…"
+                            else -> "Not on the server yet"
+                        },
                         style = MaterialTheme.typography.labelSmall,
                         color = CinemaColors.TextSecondary,
                         maxLines = 1,

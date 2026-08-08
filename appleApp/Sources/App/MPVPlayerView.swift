@@ -704,16 +704,29 @@ struct PlayerScreen: View {
                     .foregroundStyle(.red)
             }
 
+            // ONE primary button whose label and action change, never a
+            // branch that swaps one button for another.
+            //
+            // Branching looked equivalent and was not: SwiftUI gives each
+            // branch its own identity, so "Request season 2" was destroyed
+            // and "Close" created in its place. The Focus Engine had
+            // nothing to fall back to — the root is not focusable while
+            // the card is up — and the new button drew a focus ring it did
+            // not own. The card looked perfectly normal and ignored every
+            // press. Found on the tvOS simulator; two attempts to fix it
+            // by moving focus around made it worse, because the problem
+            // was never the focus value.
             HStack(spacing: 16) {
-                if offerSent {
-                    offerPrimaryButton("Close") { dismissOffer() }
-                } else if offer.alreadyRequested {
-                    offerPrimaryButton("OK") { dismissOffer() }
-                } else {
-                    offerPrimaryButton("Request season \(offer.seasonNumber)") {
+                offerPrimaryButton(primaryTitle(for: offer)) {
+                    if offerSent || offer.alreadyRequested {
+                        dismissOffer()
+                    } else {
                         requestNextSeason(offer)
                     }
-                    .disabled(offerBusy)
+                }
+                .disabled(offerBusy)
+
+                if !offerSent && !offer.alreadyRequested {
                     offerSecondaryButton("Not now") { dismissOffer() }
                 }
             }
@@ -729,6 +742,12 @@ struct PlayerScreen: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         .padding(24)
+    }
+
+    private func primaryTitle(for offer: NextSeasonOffer) -> String {
+        if offerSent { return "Close" }
+        if offer.alreadyRequested { return "OK" }
+        return "Request season \(offer.seasonNumber)"
     }
 
     // tvOS buttons stay unstyled so the system focus ring is the affordance;
@@ -799,17 +818,13 @@ struct PlayerScreen: View {
                 // coming either way, and saying so twice helps nobody
                 offerNotice = nil
                 offerSent = true
-                #if os(tvOS)
-                // The primary button was just replaced by "Close", and the
-                // Focus Engine has to be handed the new one or the remote
-                // goes dead. Assigning .primary here would do nothing: it
-                // IS .primary already, so SwiftUI sees no change — and it
-                // nils the binding itself when the old button disappears,
-                // which happens after this line. Clear it, then re-assert
-                // on the next tick, once the new button exists.
-                offerFocus = nil
-                Task { @MainActor in offerFocus = .primary }
-                #endif
+                // No focus juggling here on purpose. Clearing and
+                // re-asserting the binding looked like the careful thing
+                // to do and was worse: it made the engine resign focus it
+                // then never re-acquired, leaving a button that drew a
+                // ring and ignored every press. The button keeps its
+                // identity across the swap instead — see `.id` on it —
+                // so focus simply stays where it already was.
             case is RequestOutcome.NotSignedIn:
                 offerNotice = "Sign in to Jellyseerr again in Settings"
             case let failure as RequestOutcome.Failed:
