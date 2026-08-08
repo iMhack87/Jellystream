@@ -17,9 +17,39 @@ class NextSeasonTest {
         season: Int? = 1,
         episode: Int? = 8,
         inSeason: List<Int> = listOf(1, 2, 3, 4, 5, 6, 7, 8),
+        episodeCount: Int? = null,
         onServer: List<Int> = listOf(1),
         upstream: List<Int> = listOf(1, 2),
-    ) = NextSeason.seasonToOffer(season, episode, inSeason, onServer, upstream)
+    ) = NextSeason.seasonToOffer(season, episode, inSeason, episodeCount, onServer, upstream)
+
+    @Test
+    fun aSeasonStillDownloadingIsNotASeasonThatEnded() {
+        // The exact state the requests screen exists to show: season 1 is
+        // nine episodes, the server holds three. Counting the shelf, the
+        // third looks like the finale — and the card would say "that was
+        // the last episode" while six are missing, then offer the wrong
+        // season entirely.
+        assertNull(offer(episode = 3, inSeason = listOf(1, 2, 3), episodeCount = 9))
+        // Once the season really is complete, the same episode count says yes
+        assertEquals(
+            2,
+            offer(episode = 9, inSeason = (1..9).toList(), episodeCount = 9),
+        )
+    }
+
+    @Test
+    fun theRealLengthWinsOverTheShelfInBothDirections() {
+        // Server has everything, TMDb undercounts: still near the end
+        assertEquals(2, offer(episode = 8, inSeason = (1..8).toList(), episodeCount = 6))
+        // Server has everything, TMDb says there is more coming
+        assertNull(offer(episode = 8, inSeason = (1..8).toList(), episodeCount = 12))
+    }
+
+    @Test
+    fun anEpisodeCountOfZeroIsNoAnswerAtAll() {
+        // TMDb hands back 0 for a season it knows nothing about
+        assertEquals(2, offer(episode = 8, episodeCount = 0))
+    }
 
     @Test
     fun theLastEpisodeOfTheLastSeasonWeHoldIsTheWholePoint() {
@@ -134,11 +164,30 @@ class NextSeasonOfferCopyTest {
 class EpisodesLeftTest {
 
     @Test
-    fun whatIsLeftIsCountedNotSubtracted() {
-        assertEquals(0, NextSeason.episodesLeftAfter(8, listOf(1, 2, 8)))
-        assertEquals(1, NextSeason.episodesLeftAfter(2, listOf(1, 2, 8)))
-        assertEquals(2, NextSeason.episodesLeftAfter(1, listOf(1, 2, 8)))
+    fun withoutARealLengthTheShelfIsTheBestGuess() {
+        assertEquals(0, NextSeason.episodesLeftAfter(8, listOf(1, 2, 8), null))
+        assertEquals(1, NextSeason.episodesLeftAfter(2, listOf(1, 2, 8), null))
+        assertEquals(2, NextSeason.episodesLeftAfter(1, listOf(1, 2, 8), null))
         // Past the end of what the server holds
-        assertEquals(0, NextSeason.episodesLeftAfter(12, listOf(1, 2, 8)))
+        assertEquals(0, NextSeason.episodesLeftAfter(12, listOf(1, 2, 8), null))
+    }
+
+    @Test
+    fun episodesNotYetDownloadedAreStillAhead() {
+        // Three of nine on the shelf, watching the third: six to come
+        assertEquals(6, NextSeason.episodesLeftAfter(3, listOf(1, 2, 3), 9))
+        assertEquals(1, NextSeason.episodesLeftAfter(8, listOf(1, 2, 3), 9))
+        assertEquals(0, NextSeason.episodesLeftAfter(9, (1..9).toList(), 9))
+    }
+
+    @Test
+    fun aShelfLongerThanTheSeasonStillCounts() {
+        // TMDb undercounts often enough that it must not shorten the shelf
+        assertEquals(2, NextSeason.episodesLeftAfter(8, listOf(8, 9, 10), 8))
+    }
+
+    @Test
+    fun aLengthOfZeroIsTreatedAsUnknown() {
+        assertEquals(0, NextSeason.episodesLeftAfter(8, listOf(1, 2, 8), 0))
     }
 }

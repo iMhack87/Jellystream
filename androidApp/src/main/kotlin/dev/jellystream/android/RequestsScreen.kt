@@ -95,18 +95,24 @@ fun RequestsScreen(
         searching = false
     }
 
-    LaunchedEffect(Unit) { mine = seerr.myRequestsDetailed(REQUEST_PAGE) }
+    LaunchedEffect(Unit) { seerr.myRequestsDetailed(REQUEST_PAGE)?.let { mine = it } }
 
     // A progress bar nobody refreshes is a screenshot. Keyed on whether
-    // anything is moving, and the loop asks again every pass, so the
-    // polling stops dead once the last download lands — leaving a screen
-    // open must not keep a NAS awake all night.
-    val downloading = mine.any { it.progress != null }
-    LaunchedEffect(downloading) {
-        while (mine.any { it.progress != null }) {
+    // anything can still change, and the loop asks again every pass, so
+    // the polling stops dead once everything has landed — leaving a
+    // screen open must not keep a NAS awake all night.
+    //
+    // Watching the STATE, not the bar: a request approved a second ago
+    // has no grab yet, and waiting for one before polling means the bar
+    // never turns up. And a failed fetch answers null rather than an
+    // empty list, so a single blip cannot both blank the screen and end
+    // the loop that would have refilled it.
+    val settling = mine.any { it.isSettling }
+    LaunchedEffect(settling) {
+        while (mine.any { it.isSettling }) {
             delay(PROGRESS_POLL_MS)
             try {
-                mine = seerr.myRequestsDetailed(REQUEST_PAGE)
+                seerr.myRequestsDetailed(REQUEST_PAGE)?.let { mine = it }
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
@@ -122,7 +128,7 @@ fun RequestsScreen(
                 is RequestOutcome.Sent -> {
                     justRequested[tmdbId] = RequestState.PENDING
                     notice = "Requested $title"
-                    mine = seerr.myRequestsDetailed(REQUEST_PAGE)
+                    seerr.myRequestsDetailed(REQUEST_PAGE)?.let { mine = it }
                 }
                 is RequestOutcome.AlreadyRequested -> {
                     justRequested[tmdbId] = RequestState.PENDING
@@ -334,13 +340,17 @@ private fun SeasonPicker(
                         )
                     }
                     items(loaded.requestableSeasons, key = { "season-${it.seasonNumber}" }) { season ->
-                        val state = justRequested[season.seasonNumber]
-                            ?: loaded.stateOf(season.seasonNumber)
+                        val optimistic = justRequested[season.seasonNumber]
+                        val state = optimistic ?: loaded.stateOf(season.seasonNumber)
                         SeasonRow(
                             title = season.displayName,
                             subtitle = season.episodeCount?.let { "$it episodes" },
                             state = state,
-                            enabled = state.canRequest,
+                            // Season-level, not the title-level rule: a
+                            // partly-available season looks requestable and
+                            // is refused every time
+                            enabled = optimistic == null &&
+                                loaded.canRequestSeason(season.seasonNumber),
                             isPrimary = false,
                             onClick = { requestSeason(season.seasonNumber) },
                         )

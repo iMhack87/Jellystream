@@ -332,7 +332,10 @@ private fun PlayerSurface(
                     }
 
                     override fun onPlaybackStateChanged(state: Int) {
-                        if (state == Player.STATE_ENDED) playbackEnded = true
+                        // Cleared on the way back out, not latched: seeking
+                        // away from the end has to give the Skip Credits
+                        // pill back, which is suppressed while this is set.
+                        playbackEnded = state == Player.STATE_ENDED
                     }
 
                     // The track list only exists once demuxing has started,

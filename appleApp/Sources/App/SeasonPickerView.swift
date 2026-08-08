@@ -60,10 +60,12 @@ struct SeasonPickerView: View {
                     }
 
                     ForEach(details.requestableSeasons, id: \.seasonNumber) { season in
+                        let optimistic = justRequested[Int(season.seasonNumber)]
                         SeasonRow(
                             season: season,
-                            state: justRequested[Int(season.seasonNumber)]
-                                ?? details.stateOf(seasonNumber: season.seasonNumber),
+                            state: optimistic ?? details.stateOf(seasonNumber: season.seasonNumber),
+                            canRequest: optimistic == nil
+                                && details.canRequestSeason(seasonNumber: season.seasonNumber),
                             onRequest: { request(season) }
                         )
                     }
@@ -120,12 +122,15 @@ struct SeasonPickerView: View {
 private struct SeasonRow: View {
     let season: JellyseerrSeason
     let state: RequestState
+    /// Season-level, not the title-level `canRequest`: a partly-available
+    /// SEASON looks requestable under that rule and is refused every time.
+    let canRequest: Bool
     let onRequest: () -> Void
 
     var body: some View {
-        // Same rule as the results list: a season already downloading or
-        // already here is not a target, and must not look like one
-        if state.canRequest {
+        // A season already downloading or already here is not a target,
+        // and must not look like one
+        if canRequest {
             Button(action: onRequest) { content }
         } else {
             content

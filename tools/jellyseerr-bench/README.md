@@ -52,8 +52,14 @@ specials are in `GET /api/v1/tv/95396` precisely so that asymmetry is
 visible.
 
 Seasons already spoken for are dropped silently and the request succeeds
-with the remainder; when nothing is left it answers **409 "No seasons
-available to request"**, which the app reads as "already requested".
+with the remainder; when nothing is left it answers **202 "No seasons
+available to request"** — not 409, and not an error code at all.
+
+That 202 is the sharpest trap in this API. `NoSeasonsAvailableError` is
+answered with `status: 202` in both the Overseerr and the Seerr sources,
+so a client that reads "2xx means sent" tells people their season is on
+the way when nothing was created. The bench answers 202 precisely so
+that client fails here instead of in someone's living room.
 
 ## State, and getting it back
 

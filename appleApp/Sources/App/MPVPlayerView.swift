@@ -265,6 +265,10 @@ final class PlayerModel: ObservableObject {
     /// One nudge of the resync control.
     static let subtitleDelayStep: Double = 0.25
 
+    /// How close to the end still counts as the end. mpv is polled every
+    /// half second, so the last sample can sit a little short of duration.
+    static let endOfFileSlackSeconds: Double = 2.0
+
     func nudgeSubtitleDelay(by seconds: Double) {
         setSubtitleDelay(subtitleDelay + seconds)
     }
@@ -335,7 +339,22 @@ final class PlayerModel: ObservableObject {
         // poll, not an event — there is no mpv_wait_event loop here. And
         // `isPaused` is useless for this: a viewer pressing pause looks
         // exactly the same.
-        if !reachedEnd, getFlag("eof-reached") {
+        // A stream that dies mid-episode also raises eof-reached, and a
+        // "that was the last episode" card over minute twelve is worse
+        // than no card at all. Require the position to actually be at the
+        // end before believing it.
+        // A stream that dies mid-episode also raises eof-reached, and a
+        // "that was the last episode" card over minute twelve is worse
+        // than no card at all. Require the position to actually be at the
+        // end before believing it.
+        //
+        // Against timePos, NOT positionOffset + timePos: on a resumed
+        // transcode `duration` is the length of the window mpv is playing,
+        // while positionOffset is the media time that window starts at.
+        // Adding them compares media time to a window length and fires at
+        // once.
+        if !reachedEnd, getFlag("eof-reached"), duration > 0,
+           timePos >= duration - Self.endOfFileSlackSeconds {
             reachedEnd = true
         }
 
@@ -454,6 +473,7 @@ struct PlayerScreen: View {
     /// The end-of-episode offer card is up. Its own state, separate from the
     /// player's: closing the card must never close the player.
     @State private var showOffer = false
+    @State private var offerDismissed = false
     /// The request went through — the card turns into an acknowledgement.
     @State private var offerSent = false
     /// What Jellyseerr said when it refused. Shown inside the card and
@@ -580,9 +600,18 @@ struct PlayerScreen: View {
             }
         }
         .animation(.easeInOut(duration: 0.25), value: model.skipSegment == nil)
-        // A null offer means today's behaviour: the file ends, nothing happens
+        // A null offer means today's behaviour: the file ends, nothing happens.
+        // Both edges matter: the advisor costs four round trips and can
+        // easily answer AFTER a short episode has run out, and watching only
+        // reachedEnd would drop the card on exactly the slow servers that
+        // need it most.
         .onChange(of: model.reachedEnd) { _, ended in
-            if ended, model.nextSeasonOffer != nil {
+            if ended, model.nextSeasonOffer != nil, !offerDismissed {
+                showOffer = true
+            }
+        }
+        .onChange(of: model.nextSeasonOffer == nil) { _, isNil in
+            if !isNil, model.reachedEnd, !offerDismissed {
                 showOffer = true
             }
         }
@@ -748,6 +777,10 @@ struct PlayerScreen: View {
     private func dismissOffer() {
         showOffer = false
         offerNotice = nil
+        // Sticky, like the Android twin: dismissed once means dismissed for
+        // this playback. A card that comes back is the thing people learn
+        // to hate.
+        offerDismissed = true
     }
 
     private func requestNextSeason(_ offer: NextSeasonOffer) {

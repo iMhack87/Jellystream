@@ -132,7 +132,10 @@ class JellyseerrApiTest {
 
         assertTrue(api.search("dune").isEmpty())
         assertTrue(api.myRequests().isEmpty())
-        assertTrue(api.myRequestsDetailed(30).isEmpty())
+        // Null, not empty: a polling screen has to tell "you have no
+        // requests" from "the server did not answer", or one blip empties
+        // the list and stops the poll that would have refilled it
+        assertNull(api.myRequestsDetailed(30))
         assertTrue(api.request(1, isSeries = false) is RequestOutcome.Failed)
         assertTrue(api.requestSeasons(1, listOf(2)) is RequestOutcome.Failed)
         assertNull(api.tvDetails(1))

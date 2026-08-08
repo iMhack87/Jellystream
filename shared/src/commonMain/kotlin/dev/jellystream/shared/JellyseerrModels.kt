@@ -198,6 +198,19 @@ data class JellyseerrTvDetails(
     fun stateOf(seasonNumber: Int): RequestState =
         RequestState.of(mediaInfo?.seasons?.firstOrNull { it.seasonNumber == seasonNumber }?.status)
 
+    /**
+     * Whether asking for this one season would do anything.
+     *
+     * Narrower than [RequestState.canRequest], and deliberately so: that
+     * rule allows a partly-available *title*, because the seasons nobody
+     * has are still worth asking for. A partly-available *season* is a
+     * different thing — Jellyseerr drops every season whose status is
+     * anything but unknown, so the request comes back refused. Offering
+     * the button anyway is a promise the server will not keep.
+     */
+    fun canRequestSeason(seasonNumber: Int): Boolean =
+        stateOf(seasonNumber) == RequestState.REQUESTABLE
+
     val year: String?
         get() = firstAirDate?.takeIf { it.length >= 4 }?.take(4)
 }
@@ -290,9 +303,34 @@ data class JellyseerrRequest(
     val isSeries: Boolean
         get() = media?.mediaType == "tv"
 
-    /** How far along the download is, or null when nothing is moving. */
+    /**
+     * How far along this request is, or null when nothing is moving.
+     *
+     * Scoped to the seasons this row asked for. The download list hangs
+     * off the *media*, not the request, so two season requests on one
+     * show would otherwise show the same aggregate bar twice — each
+     * claiming the other's progress as its own.
+     */
     val progress: RequestProgress?
-        get() = RequestProgress.of(media?.downloadStatus ?: emptyList())
+        get() {
+            val grabs = media?.downloadStatus ?: emptyList()
+            val wanted = seasons.map { it.seasonNumber }.toSet()
+            val mine = if (wanted.isEmpty()) {
+                grabs
+            } else {
+                grabs.filter { it.episode?.seasonNumber in wanted }
+            }
+            return RequestProgress.of(mine)
+        }
+
+    /**
+     * Whether this row can still change on its own — the condition for
+     * polling. Progress alone is too late: a request approved a second
+     * ago has no grab yet, and if nothing watches for one, the bar never
+     * turns up at all.
+     */
+    val isSettling: Boolean
+        get() = state == RequestState.PENDING || state == RequestState.PROCESSING
 
     /**
      * "Season 2" / "Seasons 2, 3" — what this row actually asked for.
@@ -342,6 +380,10 @@ data class RequestedTitle(
 
     val progress: RequestProgress?
         get() = request.progress
+
+    /** Whether this row is still worth polling for. */
+    val isSettling: Boolean
+        get() = request.isSettling
 
     /** "Series · 2022 · Season 2" — everything under the title, in one line. */
     val subtitle: String

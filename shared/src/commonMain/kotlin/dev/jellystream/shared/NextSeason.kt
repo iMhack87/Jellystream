@@ -53,17 +53,43 @@ object NextSeason {
      */
     const val PROMPT_WITHIN_LAST_EPISODES = 2
 
-    /** Episodes of this season still to watch after [episodeNumber]. */
-    fun episodesLeftAfter(episodeNumber: Int, episodeNumbersInSeason: List<Int>): Int =
-        episodeNumbersInSeason.count { it > episodeNumber }
+    /**
+     * Episodes of this season still to come after [episodeNumber].
+     *
+     * [seasonEpisodeCount] is how long the season actually is, upstream.
+     * Counting only what the server holds is the trap: a season still
+     * downloading — the very state the requests screen exists to show —
+     * has three episodes on the shelf out of nine, and the third would
+     * look like the end of the season. It is not, and offering the NEXT
+     * season there is both a lie and the wrong thing to ask for.
+     *
+     * Null when nobody knows the real length, in which case the shelf is
+     * the best guess available.
+     */
+    fun episodesLeftAfter(
+        episodeNumber: Int,
+        episodeNumbersInSeason: List<Int>,
+        seasonEpisodeCount: Int?,
+    ): Int {
+        val onShelf = episodeNumbersInSeason.count { it > episodeNumber }
+        val total = seasonEpisodeCount?.takeIf { it > 0 } ?: return onShelf
+        // Anything the season has beyond this episode is still ahead of
+        // the viewer, downloaded or not.
+        return maxOf(onShelf, total - episodeNumber).coerceAtLeast(0)
+    }
 
     /**
      * Whether the viewer is close enough to the end of the season to be
      * worth asking. Shared by the pure rule and by the network-side
      * early exit, so the two cannot drift.
      */
-    fun isNearEndOfSeason(episodeNumber: Int, episodeNumbersInSeason: List<Int>): Boolean =
-        episodesLeftAfter(episodeNumber, episodeNumbersInSeason) < PROMPT_WITHIN_LAST_EPISODES
+    fun isNearEndOfSeason(
+        episodeNumber: Int,
+        episodeNumbersInSeason: List<Int>,
+        seasonEpisodeCount: Int?,
+    ): Boolean =
+        episodesLeftAfter(episodeNumber, episodeNumbersInSeason, seasonEpisodeCount) <
+            PROMPT_WITHIN_LAST_EPISODES
 
     /**
      * The season worth offering, or null to stay quiet.
@@ -75,6 +101,7 @@ object NextSeason {
      * @param episodeSeason the finished episode's season number
      * @param episodeNumber the finished episode's number within that season
      * @param episodeNumbersInSeason every episode of that season on the server
+     * @param seasonEpisodeCount how long the season really is, upstream
      * @param seasonsOnServer season numbers Jellyfin holds for this show
      * @param seasonsUpstream season numbers TMDb says exist, specials excluded
      */
@@ -82,6 +109,7 @@ object NextSeason {
         episodeSeason: Int?,
         episodeNumber: Int?,
         episodeNumbersInSeason: List<Int>,
+        seasonEpisodeCount: Int?,
         seasonsOnServer: List<Int>,
         seasonsUpstream: List<Int>,
     ): Int? {
@@ -92,7 +120,7 @@ object NextSeason {
         if (episodeNumbersInSeason.isEmpty()) return null
 
         // Near enough to the end that a download would land in time.
-        if (!isNearEndOfSeason(episodeNumber, episodeNumbersInSeason)) return null
+        if (!isNearEndOfSeason(episodeNumber, episodeNumbersInSeason, seasonEpisodeCount)) return null
 
         val next = episodeSeason + 1
         // Already downloaded: this is a "play next", not a "request next",
@@ -141,9 +169,10 @@ class NextSeasonAdvisor(
             val episodeNumbers = jellyfin.getEpisodes(seriesId, thisSeason.id).mapNotNull { it.indexNumber }
             if (episodeNumbers.isEmpty()) return null
             // Bail before the two remaining round trips when the viewer is
-            // still well inside the season. seasonToOffer asks the same
-            // question again through the same helper; this is only cost.
-            if (!NextSeason.isNearEndOfSeason(episodeNumber, episodeNumbers)) return null
+            // still well inside the season. Counting the shelf alone can
+            // only UNDERSTATE what is left, so a "no" here is final; the
+            // real length is applied below, where it can still say no.
+            if (!NextSeason.isNearEndOfSeason(episodeNumber, episodeNumbers, null)) return null
 
             // The series item is the only place Jellyfin keeps the TMDb id,
             // and only a single-item fetch carries ProviderIds at all.
@@ -151,16 +180,22 @@ class NextSeasonAdvisor(
             val tmdbId = series.tmdbId ?: return null
 
             val details = seerr.tvDetails(tmdbId) ?: return null
+            // How long the season really is. Without it, a season halfway
+            // through downloading looks finished at its third episode.
+            val episodeCount = details.seasons
+                .firstOrNull { it.seasonNumber == season }
+                ?.episodeCount
             val offered = NextSeason.seasonToOffer(
                 episodeSeason = season,
                 episodeNumber = episodeNumber,
                 episodeNumbersInSeason = episodeNumbers,
+                seasonEpisodeCount = episodeCount,
                 seasonsOnServer = onServer,
                 seasonsUpstream = details.seasonNumbers,
             ) ?: return null
 
             val alreadyRequested = !details.stateOf(offered).canRequest
-            val left = NextSeason.episodesLeftAfter(episodeNumber, episodeNumbers)
+            val left = NextSeason.episodesLeftAfter(episodeNumber, episodeNumbers, episodeCount)
             // Nothing to say and nothing to do: it is already on its way
             // and there is still an episode to watch. Save the news for
             // the moment they actually run out.

@@ -380,3 +380,93 @@ class BaseItemTmdbIdTest {
         assertNull(BaseItem(id = "a", providerIds = mapOf("Tmdb" to "tt1234")).tmdbId)
     }
 }
+
+class RequestPollingAndScopeTest {
+
+    private fun grab(season: Int?, size: Double, left: Double) = JellyseerrDownload(
+        size = size,
+        sizeLeft = left,
+        status = "downloading",
+        episode = season?.let { JellyseerrDownloadEpisode(seasonNumber = it, episodeNumber = 1) },
+    )
+
+    private fun seriesRequest(seasons: List<Int>, grabs: List<JellyseerrDownload>) =
+        JellyseerrRequest(
+            id = 1,
+            status = 2,
+            media = JellyseerrRequestMedia(
+                tmdbId = 1399, mediaType = "tv", status = 3, downloadStatus = grabs,
+            ),
+            seasons = seasons.map { JellyseerrRequestSeason(id = it, seasonNumber = it, status = 2) },
+        )
+
+    @Test
+    fun aSeasonRequestOwnsOnlyItsOwnSeasonsProgress() {
+        // The download list hangs off the media, not the request: two
+        // season requests on one show would each claim the other's bytes
+        val grabs = listOf(
+            grab(season = 2, size = 100.0, left = 0.0),
+            grab(season = 3, size = 100.0, left = 100.0),
+        )
+
+        assertEquals(1.0, seriesRequest(listOf(2), grabs).progress?.fraction)
+        assertEquals(0.0, seriesRequest(listOf(3), grabs).progress?.fraction)
+        // A whole-show request has no seasons named and takes the lot
+        assertEquals(0.5, seriesRequest(emptyList(), grabs).progress?.fraction)
+    }
+
+    @Test
+    fun aSeasonWithNothingOfItsOwnInFlightHasNoBar() {
+        val elsewhere = listOf(grab(season = 5, size = 100.0, left = 50.0))
+
+        assertNull(seriesRequest(listOf(2), elsewhere).progress)
+    }
+
+    @Test
+    fun pollingWatchesTheStateNotTheBar() {
+        // A request approved a second ago has no grab yet. Waiting for a
+        // progress bar before polling means the bar never turns up.
+        assertTrue(seriesRequest(listOf(2), emptyList()).isSettling)
+
+        val done = JellyseerrRequest(
+            id = 2, status = 2,
+            media = JellyseerrRequestMedia(tmdbId = 1, mediaType = "movie", status = 5),
+        )
+        assertFalse(done.isSettling)
+    }
+}
+
+class SeasonRequestabilityTest {
+
+    private val details = JellyseerrTvDetails(
+        id = 1,
+        seasons = listOf(
+            JellyseerrSeason(seasonNumber = 1),
+            JellyseerrSeason(seasonNumber = 2),
+            JellyseerrSeason(seasonNumber = 3),
+        ),
+        mediaInfo = JellyseerrMediaInfo(
+            status = 4,
+            seasons = listOf(
+                JellyseerrSeasonStatus(seasonNumber = 1, status = 5),
+                JellyseerrSeasonStatus(seasonNumber = 2, status = 4),
+            ),
+        ),
+    )
+
+    @Test
+    fun aPartlyAvailableSeasonIsNotWorthOffering() {
+        // Jellyseerr drops every season whose status is anything but
+        // unknown, so this request comes back refused however requestable
+        // the title-level rule says it looks
+        assertEquals(RequestState.PARTIALLY_AVAILABLE, details.stateOf(2))
+        assertTrue(details.stateOf(2).canRequest)
+        assertFalse(details.canRequestSeason(2))
+    }
+
+    @Test
+    fun aSeasonNobodyHasTouchedIsTheOnlyOneWorthATap() {
+        assertTrue(details.canRequestSeason(3))
+        assertFalse(details.canRequestSeason(1))
+    }
+}

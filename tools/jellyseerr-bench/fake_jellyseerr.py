@@ -78,7 +78,13 @@ SEASONS = {
     95396: [
         {"seasonNumber": 0, "name": "Specials", "episodeCount": 2,
          "airDate": "2022-04-01"},
-        {"seasonNumber": 1, "name": "Season 1", "episodeCount": 9,
+        # THREE, matching the three episodes the Jellyfin bench serves.
+        # The end-of-season prompt compares the two: a season whose real
+        # length exceeds what the server holds is still downloading, not
+        # finished, and offering the NEXT season there would be a lie.
+        # Break this number and the prompt correctly goes quiet — which
+        # looks exactly like the feature being broken.
+        {"seasonNumber": 1, "name": "Season 1", "episodeCount": 3,
          "airDate": "2022-02-18"},
         {"seasonNumber": 2, "name": "Season 2", "episodeCount": 10,
          "airDate": "2025-01-17"},
@@ -294,10 +300,14 @@ class Handler(BaseHTTPRequestHandler):
             booked = bookable_seasons(entry, body.get("seasons"))
             if not booked:
                 # Every season asked for is already spoken for. Jellyseerr
-                # says this rather than creating an empty request, and the
-                # app has to read it as "already requested", not a failure.
+                # raises NoSeasonsAvailableError, and the request route
+                # answers it with **202** — not 409, and not an error code
+                # at all. Verified in the Overseerr and Seerr sources.
+                # A bench returning 409 here would let a client that reads
+                # "2xx means sent" pass, and it would tell people their
+                # season is coming when nothing was created.
                 return self._json(
-                    {"message": "No seasons available to request"}, 409)
+                    {"message": "No seasons available to request"}, 202)
             seasons = entry.setdefault("seasonStatus", {})
             for number in booked:
                 seasons[number] = PENDING

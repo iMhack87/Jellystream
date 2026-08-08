@@ -36,6 +36,11 @@ Two details make it a real test rather than a rehearsal:
 - The show reports **TMDb id 95396**, which the [Jellyseerr
   bench](../jellyseerr-bench/README.md) knows as Severance — season 1
   available, season 2 requestable. Run both and the chain works end to end.
+  The two must agree on **how long season 1 is**: three episodes here,
+  `episodeCount: 3` there. The prompt compares them on purpose, because a
+  season whose real length exceeds what the server holds is still
+  downloading rather than finished. Change one number and the prompt goes
+  quiet — correctly, and confusingly.
 - `ProviderIds` is served **only** on the single-item fetch, never in the
   library listing, exactly as real Jellyfin trims it. The app has to
   re-fetch the series to find the TMDb id, and this bench catches it if it

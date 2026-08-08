@@ -185,6 +185,13 @@ class JellyseerrApi {
                 setBody(body)
             }
             when {
+                // 202 is NOT a success here. Asking for seasons that are
+                // all spoken for raises NoSeasonsAvailableError, which the
+                // request route answers with `status: 202` — verified in
+                // both the Overseerr and the Seerr source. Reading 2xx as
+                // "sent" tells the user their season is on the way when
+                // nothing at all was created.
+                response.status == HttpStatusCode.Accepted -> RequestOutcome.AlreadyRequested
                 response.status.isSuccess() -> RequestOutcome.Sent
                 response.status == HttpStatusCode.Conflict -> RequestOutcome.AlreadyRequested
                 response.status == HttpStatusCode.Unauthorized ||
@@ -194,9 +201,8 @@ class JellyseerrApi {
                 }
                 else -> {
                     val message = response.errorMessage()
-                    // Asking for seasons that are all spoken for comes back
-                    // as a plain failure with this text; it means the same
-                    // thing a 409 does on a whole title.
+                    // Older builds answered the same case with a plain
+                    // failure carrying this text.
                     if (message != null && message.contains("no seasons available", ignoreCase = true)) {
                         RequestOutcome.AlreadyRequested
                     } else {
@@ -237,11 +243,22 @@ class JellyseerrApi {
         }
     }
 
-    /** What this account has asked for, newest first. */
+    /** What this account has asked for, newest first. Empty on failure. */
     @Throws(Throwable::class)
-    suspend fun myRequests(limit: Int = 30): List<JellyseerrRequest> {
-        val base = baseUrl ?: return emptyList()
-        if (cookie == null) return emptyList()
+    suspend fun myRequests(limit: Int = 30): List<JellyseerrRequest> =
+        fetchRequests(limit) ?: emptyList()
+
+    /**
+     * The same list, but null when the server could not be reached.
+     *
+     * The distinction is the whole point: a screen that polls has to tell
+     * "you have no requests" from "ask again in five seconds", or one
+     * blip empties the list and — since the poll stops when the list has
+     * nothing left to watch — never fills it again.
+     */
+    private suspend fun fetchRequests(limit: Int): List<JellyseerrRequest>? {
+        val base = baseUrl ?: return null
+        if (cookie == null) return null
         return try {
             val response: HttpResponse = http.get("$base/api/v1/request") {
                 url.parameters.append("take", limit.toString())
@@ -250,12 +267,12 @@ class JellyseerrApi {
                 url.parameters.append("requestedBy", "me")
                 authorize()
             }
-            if (!response.status.isSuccess()) return emptyList()
+            if (!response.status.isSuccess()) return null
             response.body<JellyseerrRequestPage>().results
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            emptyList()
+            null
         }
     }
 
@@ -269,11 +286,13 @@ class JellyseerrApi {
      * server running on someone's NAS.
      *
      * A detail endpoint that will not answer costs the titles, not the
-     * list — the rows still render, just as "Series request".
+     * list — the rows still render, just as "Series request". An
+     * unreachable *list* endpoint is different, and answers null: a
+     * polling screen must not mistake it for "you have no requests".
      */
     @Throws(Throwable::class)
-    suspend fun myRequestsDetailed(limit: Int): List<RequestedTitle> {
-        val rows = myRequests(limit)
+    suspend fun myRequestsDetailed(limit: Int): List<RequestedTitle>? {
+        val rows = fetchRequests(limit) ?: return null
         if (rows.isEmpty()) return emptyList()
         return try {
             coroutineScope {

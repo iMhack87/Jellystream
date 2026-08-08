@@ -71,17 +71,20 @@ struct RequestsView: View {
         }
         #endif
         .task(id: query) { await runSearch() }
-        .task { mine = await loadRequests() }
+        .task { await refreshRequests() }
         // A progress bar nobody refreshes is a screenshot. Keyed on whether
-        // anything is actually moving, so the loop stops dead once the last
-        // download lands — and starts again on its own when a new one
-        // begins. Leaving this screen open must not keep a NAS awake all
+        // anything can still change, so the loop stops dead once everything
+        // has landed — and starts again on its own when something new is
+        // asked for. Leaving this screen open must not keep a NAS awake all
         // night; `.task` also ends it the moment the screen goes away.
-        .task(id: isDownloading) { await pollRequests() }
+        .task(id: isSettling) { await pollRequests() }
     }
 
-    private var isDownloading: Bool {
-        mine.contains { $0.progress != nil }
+    /// Watching the STATE, not the bar: a request approved a second ago has
+    /// no grab yet, and waiting for one before polling means the bar never
+    /// turns up at all.
+    private var isSettling: Bool {
+        mine.contains { $0.isSettling }
     }
 
     private func runSearch() async {
@@ -99,18 +102,24 @@ struct RequestsView: View {
         searching = false
     }
 
-    /// Re-asks every 5 s for as long as at least one row is downloading.
+    /// Re-asks every 5 s for as long as anything can still change.
     private func pollRequests() async {
-        while isDownloading {
+        while isSettling {
             try? await Task.sleep(nanoseconds: 5_000_000_000)
             guard !Task.isCancelled else { return }
-            mine = await loadRequests()
+            await refreshRequests()
         }
     }
 
-    private func loadRequests() async -> [RequestedTitle] {
+    /// A failed fetch answers nil rather than an empty list, and is simply
+    /// skipped. Overwriting on failure would blank a good list on one blip
+    /// — and, since the poll stops when nothing is left to watch, would
+    /// also end the loop that was going to refill it.
+    private func refreshRequests() async {
         // Kotlin default arguments do not bridge — the limit is spelled out
-        (try? await seerr.myRequestsDetailed(limit: 30)) ?? []
+        if let rows = try? await seerr.myRequestsDetailed(limit: 30) {
+            mine = rows
+        }
     }
 
     private func request(_ result: JellyseerrResult) {
@@ -123,7 +132,7 @@ struct RequestsView: View {
             case is RequestOutcome.Sent:
                 justRequested[Int(result.id)] = .pending
                 notice = "Requested \(result.displayTitle)"
-                mine = await loadRequests()
+                await refreshRequests()
             case is RequestOutcome.AlreadyRequested:
                 justRequested[Int(result.id)] = .pending
                 notice = "\(result.displayTitle) was already requested"
