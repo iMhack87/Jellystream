@@ -215,7 +215,7 @@ struct HomeView: View {
                 .padding(32)
             } else if let sections {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 36) {
+                    LazyVStack(alignment: .leading, spacing: HomeMetrics.rowSpacing) {
                         // Hero must be openable: first playable item or series
                         if let hero = sections.flatMap(\.items)
                             .first(where: { $0.isPlayable || $0.isSeries }) {
@@ -249,6 +249,16 @@ struct HomeView: View {
                         }
 
                         FavouritesRow(api: api)
+                        // Each of the three rows above collapses to zero
+                        // height when empty, but the stack's spacing does
+                        // not: three hidden rows still left 108 points of
+                        // nothing between Continue Watching and the
+                        // libraries. They cancel their own gap instead —
+                        // see `hiddenRowSpacing`. Lifting the emptiness
+                        // check up here would be tidier and is exactly the
+                        // trap in CLAUDE.md: the row would resolve to
+                        // EmptyView, its `.task` would never run, and it
+                        // could never discover it had something to show.
 
                         ForEach(sections.filter { !$0.isContinue }) { section in
                             LibraryRow(api: api, section: section)
@@ -330,6 +340,22 @@ enum HomeMetrics {
     static let rowVerticalPadding: CGFloat = 12
     static let cardSpacing: CGFloat = 16
     #endif
+
+    /** Gap between shelves on the home screen. */
+    static let rowSpacing: CGFloat = 36
+
+    /**
+     A row that has nothing to show must not leave a hole.
+
+     It can collapse to zero height on its own, but the stack's spacing is
+     applied between children whatever their size — three hidden rows left
+     108 points of nothing in the middle of the home screen. Cancelling
+     the gap here is the local fix; the tidy one (not building the row at
+     all) is the trap CLAUDE.md documents, because the row would resolve
+     to EmptyView and its `.task` would never run to find out whether it
+     had anything.
+     */
+    static let hiddenRowSpacing: CGFloat = -rowSpacing
 }
 
 /** Full-bleed backdrop melting into black — the ATV+ hero. */
@@ -654,6 +680,7 @@ private struct RequestedRow: View {
                 }
             }
         }
+        .padding(.bottom, rows.isEmpty ? HomeMetrics.hiddenRowSpacing : 0)
         .task { await load() }
         .onChange(of: feed.requests) { _, published in
             // Only what can still change: an available request is in the
@@ -762,6 +789,7 @@ private struct WatchlistRow: View {
                 }
             }
         }
+        .padding(.bottom, cards.isEmpty ? HomeMetrics.hiddenRowSpacing : 0)
         .task(id: store.stamp) { await load() }
     }
 
@@ -897,6 +925,7 @@ private struct FavouritesRow: View {
             }
         }
         // Kotlin default arguments do not bridge — the limit is spelled out
+        .padding(.bottom, items.isEmpty ? HomeMetrics.hiddenRowSpacing : 0)
         .task { items = (try? await api.getFavorites(limit: 24)) ?? [] }
     }
 }

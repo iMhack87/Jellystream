@@ -279,14 +279,18 @@ class ArrivalsTest {
 
     @Test
     fun somethingThatLandsWhileWatchingIsAnnouncedOnce() {
-        val seen = Arrivals.seen(listOf(request(1, 3, "Severance")), AnnouncedArrivals())
+        val seen = Arrivals.seen(
+            listOf(request(1, 3, "Severance")),
+            AnnouncedArrivals(),
+            announcing = emptyList(),
+        )
 
         val landed = Arrivals.landed(listOf(request(1, 5, "Severance")), seen, firstLook = false)
         assertEquals(1, landed.size)
         assertEquals("Severance has arrived", landed.first().message)
 
         // And not a second time
-        val after = Arrivals.seen(listOf(request(1, 5, "Severance")), seen)
+        val after = Arrivals.seenAfterShowing(landed.first(), seen)
         assertTrue(Arrivals.landed(listOf(request(1, 5, "Severance")), after, firstLook = false).isEmpty())
     }
 
@@ -317,6 +321,7 @@ class ArrivalsTest {
         val seen = Arrivals.seen(
             listOf(request(1, 5, "A"), request(2, 5, "B")),
             AnnouncedArrivals(),
+            announcing = emptyList(),
         )
         assertEquals(setOf(1, 2), seen.requestIds)
 
@@ -324,7 +329,7 @@ class ArrivalsTest {
         // forgotten: the poll only ever sees the newest requests, so an
         // older id is missing from every answer, and forgetting it means
         // announcing that title again the day it comes back into view.
-        val later = Arrivals.seen(listOf(request(1, 5, "A")), seen)
+        val later = Arrivals.seen(listOf(request(1, 5, "A")), seen, announcing = emptyList())
         assertEquals(setOf(1, 2), later.requestIds)
     }
 
@@ -455,8 +460,67 @@ class AnnouncedCapTest {
             )
         )
 
-        val seen = Arrivals.seen(page, announced)
+        val seen = Arrivals.seen(page, announced, announcing = emptyList())
 
         assertTrue(seen.requestIds.containsAll(setOf(1, 2, 3, 9)))
+    }
+}
+
+class ArrivalBookkeepingTest {
+
+    private fun row(id: Int, status: Int) = RequestedTitle(
+        JellyseerrRequest(
+            id = id, status = 2,
+            media = JellyseerrRequestMedia(tmdbId = id, mediaType = "movie", status = status),
+        ),
+        title = "Title $id",
+    )
+
+    @Test
+    fun aNoticeStillQueuedIsNotYetWrittenOffAsAnnounced() {
+        // Recording it at poll time means a queue dropped before it ever
+        // appeared — a profile switch, the app killed — loses that notice
+        // for good, and nothing raises it again
+        val requests = listOf(row(1, 5))
+        val landed = Arrivals.landed(requests, AnnouncedArrivals(), firstLook = false)
+
+        val afterPoll = Arrivals.seen(requests, AnnouncedArrivals(), landed)
+        assertFalse(1 in afterPoll.requestIds)
+
+        val afterShowing = Arrivals.seenAfterShowing(landed.first(), afterPoll)
+        assertTrue(1 in afterShowing.requestIds)
+    }
+
+    @Test
+    fun aFirstLookIsStillRecordedWhole() {
+        // Nothing is being announced, so everything available is written
+        // off immediately — otherwise the second poll announces the lot
+        val requests = listOf(row(1, 5), row(2, 5))
+
+        val seen = Arrivals.seen(requests, AnnouncedArrivals(), announcing = emptyList())
+
+        assertEquals(setOf(1, 2), seen.requestIds)
+    }
+
+    @Test
+    fun aBlobFromAnotherJellyseerrCountsAsNothingStored() {
+        // Request ids are one server's numbering. Replaying them against
+        // another silences real arrivals and invents ones that never were.
+        val fromOldServer = AnnouncedArrivals(setOf(1, 2, 3), server = "https://old.example")
+
+        val forNew = fromOldServer.forServer("https://new.example")
+        assertTrue(forNew.requestIds.isEmpty())
+        assertEquals("https://new.example", forNew.server)
+
+        // And the same server keeps everything
+        assertEquals(fromOldServer, fromOldServer.forServer("https://old.example"))
+    }
+
+    @Test
+    fun aPartlyAvailableShowIsNotAnArrival() {
+        // One season landed, another has not: "it has arrived" is a lie
+        val partly = listOf(row(1, 4))
+
+        assertTrue(Arrivals.landed(partly, AnnouncedArrivals(), firstLook = false).isEmpty())
     }
 }

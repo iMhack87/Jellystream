@@ -47,7 +47,7 @@ final class ArrivalToastWindow {
 
     private let model = ToastModel()
     private var window: UIWindow?
-    private var pending: [String] = []
+    private var pending: [(message: String, onShown: () -> Void)] = []
     private var runner: Task<Void, Never>?
 
     private init() {}
@@ -80,14 +80,20 @@ final class ArrivalToastWindow {
 
     /// Queued rather than replaced: two titles landing in the same poll
     /// would otherwise show as one.
-    func show(message: String) {
-        pending.append(message)
+    ///
+    /// `onShown` runs once the notice has had its time on screen — that
+    /// is when the caller writes it off as announced, so a queue dropped
+    /// before it ever appeared is not silently forgotten.
+    func show(message: String, onShown: @escaping () -> Void = {}) {
+        pending.append((message, onShown))
         guard runner == nil else { return }
         runner = Task { @MainActor in
             while !pending.isEmpty {
-                model.message = pending.removeFirst()
+                let (text, done) = pending.removeFirst()
+                model.message = text
                 try? await Task.sleep(nanoseconds: 5_000_000_000)
                 model.message = nil
+                done()
                 try? await Task.sleep(nanoseconds: 400_000_000)
             }
             runner = nil

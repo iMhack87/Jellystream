@@ -552,6 +552,15 @@ private fun NextSeasonCard(
             .background(Color.Black.copy(alpha = 0.72f)),
         contentAlignment = Alignment.Center,
     ) {
+        // Says its piece and goes: two seconds is long enough to read one
+        // sentence and short enough that nobody reaches for the remote to
+        // get rid of it.
+        LaunchedEffect(sent) {
+            if (!sent) return@LaunchedEffect
+            delay(SENT_CARD_MS)
+            onDismiss()
+        }
+
         Column(
             modifier = Modifier
                 .padding(24.dp)
@@ -586,9 +595,12 @@ private fun NextSeasonCard(
                     color = MaterialTheme.colorScheme.error,
                 )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            // Nothing to press once it is sent: the confirmation says its
+            // piece and goes (see the effect above). A button there would
+            // be a button whose only job is to dismiss something that was
+            // already leaving.
+            if (!sent) Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 when {
-                    sent -> PlayerCardButton("Close", isPrimary = true, grabsFocus = true, onClick = onDismiss)
                     offer.alreadyRequested ->
                         PlayerCardButton("OK", isPrimary = true, grabsFocus = true, onClick = onDismiss)
                     else -> {
@@ -767,6 +779,9 @@ private fun applySubtitleDefault(
 }
 
 /** One step of the resync control, in seconds. */
+/** How long the "requested" confirmation stays before going away. */
+private const val SENT_CARD_MS = 2_000L
+
 private const val SUBTITLE_DELAY_STEP = 0.25
 
 /**

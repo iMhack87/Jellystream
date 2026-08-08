@@ -618,7 +618,10 @@ struct PlayerScreen: View {
         #if os(tvOS)
         // While an overlay is open the Focus Engine must own the arrows:
         // the outer view stops being focusable and stops intercepting moves
-        .focusable(!showTracks && !showOffer)
+        // `offerSent` is deliberately excluded: the confirmation has no
+        // button, so the root has to be focusable again or the remote is
+        // dead for the two seconds it is up — Menu included.
+        .focusable(!showTracks && !(showOffer && !offerSent))
         .onPlayPauseCommand { model.togglePause() }
         .onMoveCommand { direction in
             guard !showTracks, !showOffer else { return }
@@ -704,20 +707,38 @@ struct PlayerScreen: View {
                     .foregroundStyle(.red)
             }
 
-            HStack(spacing: 16) {
-                if offerSent {
-                    offerPrimaryButton("Close") { dismissOffer() }
-                } else if offer.alreadyRequested {
-                    offerPrimaryButton("OK") { dismissOffer() }
-                } else {
-                    offerPrimaryButton("Request season \(offer.seasonNumber)") {
-                        requestNextSeason(offer)
+            // ONE primary button whose label and action change, never a
+            // branch that swaps one button for another.
+            //
+            // Branching looked equivalent and was not: SwiftUI gives each
+            // branch its own identity, so "Request season 2" was destroyed
+            // and "Close" created in its place. The Focus Engine had
+            // nothing to fall back to — the root is not focusable while
+            // the card is up — and the new button drew a focus ring it did
+            // not own. The card looked perfectly normal and ignored every
+            // press. Found on the tvOS simulator; two attempts to fix it
+            // by moving focus around made it worse, because the problem
+            // was never the focus value.
+            // Nothing to press once it is sent: the confirmation says its
+            // piece and goes. A button there would be a button whose only
+            // job is to dismiss something that was already leaving.
+            if !offerSent {
+                HStack(spacing: 16) {
+                    offerPrimaryButton(primaryTitle(for: offer)) {
+                        if offer.alreadyRequested {
+                            dismissOffer()
+                        } else {
+                            requestNextSeason(offer)
+                        }
                     }
                     .disabled(offerBusy)
-                    offerSecondaryButton("Not now") { dismissOffer() }
+
+                    if !offer.alreadyRequested {
+                        offerSecondaryButton("Not now") { dismissOffer() }
+                    }
                 }
+                .padding(.top, 4)
             }
-            .padding(.top, 4)
         }
         #if os(tvOS)
         .padding(40)
@@ -729,6 +750,11 @@ struct PlayerScreen: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         .padding(24)
+    }
+
+    private func primaryTitle(for offer: NextSeasonOffer) -> String {
+        if offer.alreadyRequested { return "OK" }
+        return "Request season \(offer.seasonNumber)"
     }
 
     // tvOS buttons stay unstyled so the system focus ring is the affordance;
@@ -799,17 +825,15 @@ struct PlayerScreen: View {
                 // coming either way, and saying so twice helps nobody
                 offerNotice = nil
                 offerSent = true
-                #if os(tvOS)
-                // The primary button was just replaced by "Close", and the
-                // Focus Engine has to be handed the new one or the remote
-                // goes dead. Assigning .primary here would do nothing: it
-                // IS .primary already, so SwiftUI sees no change — and it
-                // nils the binding itself when the old button disappears,
-                // which happens after this line. Clear it, then re-assert
-                // on the next tick, once the new button exists.
-                offerFocus = nil
-                Task { @MainActor in offerFocus = .primary }
-                #endif
+                // Says its piece and goes: two seconds is long enough to
+                // read one sentence and short enough that nobody reaches
+                // for the remote to get rid of it. No button, so no focus
+                // to juggle — which is also what finally killed the tvOS
+                // dead-remote bug rather than papering over it.
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    if offerSent { dismissOffer() }
+                }
             case is RequestOutcome.NotSignedIn:
                 offerNotice = "Sign in to Jellyseerr again in Settings"
             case let failure as RequestOutcome.Failed:

@@ -196,10 +196,26 @@ def settle_downloads(entry):
     land(entry)
 
 
-def land(entry):
-    """Mark a title, and every season anybody asked for, as available."""
-    entry["status"] = AVAILABLE
+def land(entry, only=None):
+    """Mark a title as available — or only some of its seasons.
+
+    `only` exists for the case the arrival notice must stay quiet for: a
+    show where some seasons land and others do not is PARTIALLY available,
+    not available, and announcing "it has arrived" then would be a lie.
+    Without a way to reach that state the bench can only ever prove the
+    notice fires, never that it holds its tongue.
+    """
     seasons = entry.get("seasonStatus")
+    if only and seasons:
+        for number in only:
+            if number in seasons:
+                seasons[number] = AVAILABLE
+        entry["status"] = (
+            AVAILABLE if all(s == AVAILABLE for s in seasons.values()) else PARTIAL
+        )
+        return
+
+    entry["status"] = AVAILABLE
     if seasons:
         for number in list(seasons):
             seasons[number] = AVAILABLE
@@ -308,8 +324,15 @@ class Handler(BaseHTTPRequestHandler):
             entry = find(int(m.group(1)))
             if entry is None:
                 return self._json({"message": "Not found"}, 404)
-            land(entry)
-            return self._json({"landed": entry["id"], "status": entry["status"]})
+            # ?seasons=2,3 lands only those — the partly-available case
+            raw = re.search(r"seasons=([0-9,]+)", self.path)
+            only = [int(n) for n in raw.group(1).split(",")] if raw else None
+            land(entry, only)
+            return self._json({
+                "landed": entry["id"],
+                "status": entry["status"],
+                "seasons": entry.get("seasonStatus", {}),
+            })
 
         if path == "/api/v1/bench/reset":
             global START

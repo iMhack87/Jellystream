@@ -76,6 +76,18 @@ curl -X POST localhost:5055/api/v1/bench/land/242582
 That marks the title, and every season anybody asked for, as available
 right now.
 
+**Landing only part of a show** is the case the notice must stay *quiet*
+for — a show where one season arrives and another has not is partly
+available, not available, and "it has arrived" would be a lie:
+
+```bash
+curl -X POST "localhost:5055/api/v1/request" -H "Cookie: connect.sid=bench-session" \
+  -H "Content-Type: application/json" -d '{"mediaType":"tv","mediaId":1399,"seasons":[3]}'
+curl -X POST "localhost:5055/api/v1/bench/land/1399?seasons=2"
+```
+
+The title comes back `status: 4`, and nothing should be announced.
+
 ## State, and getting it back
 
 Every request mutates the fixtures in place, so after one E2E run the

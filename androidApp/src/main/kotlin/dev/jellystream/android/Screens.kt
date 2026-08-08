@@ -928,7 +928,14 @@ fun SearchScreen(
                 // A hit is one server's row or the other's, never both
                 key = { it.jellyfin?.id ?: "tmdb-${it.jellyseerr?.id}" },
             ) { hit ->
-                val state = hit.tmdbId?.let { justRequested[it] } ?: hit.requestState
+                // Nothing to override when there is nothing to ask for:
+                // requestState is null on a row that is on the server, and
+                // an optimistic chip left over from asking for one season
+                // of a show would otherwise reappear on the row for the
+                // show itself. The Apple twin reads it the same way.
+                val state = hit.requestState?.let { known ->
+                    hit.tmdbId?.let { justRequested[it] } ?: known
+                }
                 SearchHitRow(
                     api = api,
                     hit = hit,

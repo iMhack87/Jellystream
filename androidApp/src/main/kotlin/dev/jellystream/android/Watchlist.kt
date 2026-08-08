@@ -26,4 +26,9 @@ class WatchlistStore(context: Context, profileKey: String) {
     fun save(watchlist: Watchlist) {
         prefs.edit().putString(key, watchlist.toJson()).apply()
     }
+
+    /** Nothing outlives an account the install no longer knows. */
+    fun clear() {
+        prefs.edit().remove(key).apply()
+    }
 }
