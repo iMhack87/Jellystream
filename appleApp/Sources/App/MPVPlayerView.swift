@@ -618,7 +618,10 @@ struct PlayerScreen: View {
         #if os(tvOS)
         // While an overlay is open the Focus Engine must own the arrows:
         // the outer view stops being focusable and stops intercepting moves
-        .focusable(!showTracks && !showOffer)
+        // `offerSent` is deliberately excluded: the confirmation has no
+        // button, so the root has to be focusable again or the remote is
+        // dead for the two seconds it is up — Menu included.
+        .focusable(!showTracks && !(showOffer && !offerSent))
         .onPlayPauseCommand { model.togglePause() }
         .onMoveCommand { direction in
             guard !showTracks, !showOffer else { return }
@@ -716,21 +719,26 @@ struct PlayerScreen: View {
             // press. Found on the tvOS simulator; two attempts to fix it
             // by moving focus around made it worse, because the problem
             // was never the focus value.
-            HStack(spacing: 16) {
-                offerPrimaryButton(primaryTitle(for: offer)) {
-                    if offerSent || offer.alreadyRequested {
-                        dismissOffer()
-                    } else {
-                        requestNextSeason(offer)
+            // Nothing to press once it is sent: the confirmation says its
+            // piece and goes. A button there would be a button whose only
+            // job is to dismiss something that was already leaving.
+            if !offerSent {
+                HStack(spacing: 16) {
+                    offerPrimaryButton(primaryTitle(for: offer)) {
+                        if offer.alreadyRequested {
+                            dismissOffer()
+                        } else {
+                            requestNextSeason(offer)
+                        }
+                    }
+                    .disabled(offerBusy)
+
+                    if !offer.alreadyRequested {
+                        offerSecondaryButton("Not now") { dismissOffer() }
                     }
                 }
-                .disabled(offerBusy)
-
-                if !offerSent && !offer.alreadyRequested {
-                    offerSecondaryButton("Not now") { dismissOffer() }
-                }
+                .padding(.top, 4)
             }
-            .padding(.top, 4)
         }
         #if os(tvOS)
         .padding(40)
@@ -745,7 +753,6 @@ struct PlayerScreen: View {
     }
 
     private func primaryTitle(for offer: NextSeasonOffer) -> String {
-        if offerSent { return "Close" }
         if offer.alreadyRequested { return "OK" }
         return "Request season \(offer.seasonNumber)"
     }
@@ -818,13 +825,15 @@ struct PlayerScreen: View {
                 // coming either way, and saying so twice helps nobody
                 offerNotice = nil
                 offerSent = true
-                // No focus juggling here on purpose. Clearing and
-                // re-asserting the binding looked like the careful thing
-                // to do and was worse: it made the engine resign focus it
-                // then never re-acquired, leaving a button that drew a
-                // ring and ignored every press. The button keeps its
-                // identity across the swap instead — see `.id` on it —
-                // so focus simply stays where it already was.
+                // Says its piece and goes: two seconds is long enough to
+                // read one sentence and short enough that nobody reaches
+                // for the remote to get rid of it. No button, so no focus
+                // to juggle — which is also what finally killed the tvOS
+                // dead-remote bug rather than papering over it.
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    if offerSent { dismissOffer() }
+                }
             case is RequestOutcome.NotSignedIn:
                 offerNotice = "Sign in to Jellyseerr again in Settings"
             case let failure as RequestOutcome.Failed:
