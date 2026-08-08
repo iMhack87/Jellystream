@@ -21,3 +21,22 @@ Point a client at `http://10.0.2.2:8097` from the Android emulator, or
 `http://localhost:8097` from an Apple simulator. Any username, no password.
 
 The `.mkv` files are generated, never committed.
+
+## A show whose next season is missing
+
+The same three files are served a second time as **season 1 of a show,
+and only season 1**. Watch episode 3 to the end and the player should
+offer to request season 2.
+
+Forty-second episodes are the point: the end of a season arrives in a
+minute rather than an hour.
+
+Two details make it a real test rather than a rehearsal:
+
+- The show reports **TMDb id 95396**, which the [Jellyseerr
+  bench](../jellyseerr-bench/README.md) knows as Severance — season 1
+  available, season 2 requestable. Run both and the chain works end to end.
+- `ProviderIds` is served **only** on the single-item fetch, never in the
+  library listing, exactly as real Jellyfin trims it. The app has to
+  re-fetch the series to find the TMDb id, and this bench catches it if it
+  does not.

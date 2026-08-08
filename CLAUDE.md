@@ -35,11 +35,12 @@ xcodebuild -project Jellystream.xcodeproj -scheme JellystreamTV -destination 'ge
 ## Vérification E2E (simulateur / émulateur)
 
 - Serveur de test public : `demo.jellyfin.org/stable`, utilisateur `demo`, sans mot de passe. Ne jamais saisir les identifiants du serveur personnel de Matthieu.
-- **La démo publique n'a AUCUN sous-titre** (0 item sur 17) et il n'existe **aucune instance Jellyseerr publique**. D'où deux bancs locaux dans `tools/` :
+- **La démo publique n'a AUCUN sous-titre** (0 item sur 17), une seule série, et il n'existe **aucune instance Jellyseerr publique**. D'où deux bancs locaux dans `tools/` :
   ```bash
   cd tools/subtitle-bench && ./make_fixtures.sh && python3 fake_jellyfin.py 8097
   cd tools/jellyseerr-bench && python3 fake_jellyseerr.py 5055   # mot de passe : bench
   ```
+  Les deux se complètent : le banc Jellyfin sert une série dont **seule la saison 1 existe**, avec le TMDb id 95396 que le banc Jellyseerr connaît comme Severance (S1 dispo, S2 demandable). Finir le 3ᵉ épisode (40 s) déclenche donc la proposition de demander la saison 2, de bout en bout. Le banc Jellyseerr fait **bouger la progression** avec l'horloge ; `POST /api/v1/bench/reset` remet les fixtures à zéro entre deux runs.
   Émulateur Android → `10.0.2.2:<port>` ; simulateurs Apple → `localhost:<port>`. **Tester hors ligne** : côté Android `adb shell settings put global airplane_mode_on 1` + broadcast ; côté Apple, tuer le banc (`pkill -f fake_jellyfin.py`) — c'est là qu'on trouve les vrais bugs. Vérifier avec `lsof -nP -iTCP:<port> -sTCP:LISTEN` qu'un banc d'une session précédente ne squatte pas le port.
 - **Saisie clavier dans un simulateur Apple : ne pas compter dessus.** Sur iOS l'injection `type` sort du charabia même après avoir forcé QWERTY (`defaults write .GlobalPreferences AppleKeyboards`) ; sur tvOS le clavier de recherche ne valide aucune touche, ni au clavier ni à la souris. Préférer la **pré-injection d'état** (session, réglages, cookie) dans le plist du conteneur.
 - **Émulateur Android** : les taps par coordonnées cassent dès que le clavier s'ouvre (le layout remonte, `safeDrawingPadding` inclut l'IME). Fiable : tap sur le 1er champ, puis `input keyevent 61` (TAB) pour passer au champ suivant, `KEYCODE_BACK` pour fermer le clavier avant de taper un bouton. L'autocorrect peut réécrire le texte ("demo"→"demon ") : toujours vérifier par capture avant de valider.
