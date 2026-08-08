@@ -6,6 +6,10 @@ struct LibrarySection: Identifiable {
     let key: String
     let items: [BaseItem]
     var id: String { key }
+
+    /// The two rows that are drawn as landscape cards with a progress
+    /// bar, and the two the new rows have to come after.
+    var isContinue: Bool { key == "resume" || key == "nextup" }
 }
 
 struct HomeView: View {
@@ -14,6 +18,9 @@ struct HomeView: View {
     let settings: AppSettings
     let seerr: JellyseerrApi
     let downloader: Downloader?
+    /// Per profile like the downloader, and handed down the same way so a
+    /// detail screen two pushes deeper writes the list the home row reads.
+    let watchlist: WatchlistStore?
     let profile: PersistedSession?
     let onSettingsChange: (AppSettings) -> Void
     let onProfileChange: (PersistedSession) -> Void
@@ -44,6 +51,7 @@ struct HomeView: View {
             // .onAppear would have run — hence an environment value
             .environment(\.appSettings, settings)
             .environment(\.downloader, downloader)
+            .environment(\.watchlist, watchlist)
             .environment(\.downloadingAllowed, downloadingAllowed)
             .task { downloadingAllowed = try? await api.canDownload()?.boolValue }
             .preferredColorScheme(.dark)
@@ -114,7 +122,7 @@ struct HomeView: View {
             .tag(Tab.home)
 
             NavigationStack {
-                SearchView(api: api)
+                SearchView(api: api, seerr: seerr)
                     .itemDestination(api: api, seerr: seerr)
             }
             .tabItem { Label("Search", systemImage: "magnifyingglass") }
@@ -134,7 +142,7 @@ struct HomeView: View {
             homeScroll
                 .itemDestination(api: api, seerr: seerr)
                 .navigationDestination(isPresented: $showSearch) {
-                    SearchView(api: api)
+                    SearchView(api: api, seerr: seerr)
                 }
                 .toolbar {
                     Button {
@@ -215,12 +223,35 @@ struct HomeView: View {
                                 playingItem = hero
                             }
                         }
-                        ForEach(sections) { section in
-                            if section.key == "resume" || section.key == "nextup" {
-                                ContinueRow(api: api, section: section)
-                            } else {
-                                LibraryRow(api: api, section: section)
-                            }
+                        // Split rather than one ForEach with a key
+                        // dispatch: the three rows below are not
+                        // LibrarySections (one of them is not even
+                        // Jellyfin's) and they belong between the
+                        // continue rows and the libraries.
+                        ForEach(sections.filter(\.isContinue)) { section in
+                            ContinueRow(api: api, section: section)
+                        }
+
+                        // Each of these loads on its own, OUTSIDE load():
+                        // that function assigns its sections only at the
+                        // very end, so folding a Jellyseerr call into it
+                        // would make the hero itself wait on the request
+                        // server — and block on its timeout when the NAS
+                        // is off.
+                        RequestedRow(seerr: seerr)
+
+                        if let watchlist {
+                            WatchlistRow(
+                                api: api,
+                                store: watchlist,
+                                onServer: sections.flatMap(\.items)
+                            )
+                        }
+
+                        FavouritesRow(api: api)
+
+                        ForEach(sections.filter { !$0.isContinue }) { section in
+                            LibraryRow(api: api, section: section)
                         }
                     }
                     .padding(.bottom, 40)
@@ -556,6 +587,317 @@ private struct LibraryRow: View {
             .scrollClipDisabled()
             #endif
         }
+    }
+}
+
+/**
+ * The shelf scaffolding the three new rows share: title, horizontal
+ * strip, the same paddings as LibraryRow. Extracted because none of them
+ * is a LibrarySection and copying the layout three times would let them
+ * drift apart.
+ */
+private struct Shelf<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.title2.bold())
+                .foregroundStyle(.white)
+                .padding(.horizontal, HomeMetrics.edgePadding)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: HomeMetrics.cardSpacing) {
+                    content()
+                }
+                .padding(.horizontal, HomeMetrics.edgePadding)
+                .padding(.vertical, HomeMetrics.rowVerticalPadding)
+            }
+            // Lets the focus lift scale outside the scroll bounds unclipped
+            #if os(tvOS)
+            .scrollClipDisabled()
+            #endif
+        }
+    }
+}
+
+/**
+ * What has been asked for and is still moving.
+ *
+ * Its own state and its own task: this is the Jellyseerr call, and the
+ * home screen's `load()` publishes its sections only at the end, so
+ * asking for it there would make the hero wait on the request server —
+ * and hang for its whole timeout when the NAS is off.
+ */
+private struct RequestedRow: View {
+    let seerr: JellyseerrApi
+
+    /// The app-wide arrival poll's own answer. Reading it rather than
+    /// fetching again is what stops the notice announcing a title above a
+    /// row that still says it is downloading — and it keeps the progress
+    /// bars moving without a second poll.
+    @ObservedObject private var feed = RequestFeed.shared
+    @State private var rows: [RequestedTitle] = []
+
+    var body: some View {
+        // A real container, not a Group: a Group whose condition is false
+        // resolves to EmptyView, which is not in the view tree at all —
+        // and a `.task` on nothing never runs, so the row would stay
+        // empty for ever because it never got to ask.
+        VStack(alignment: .leading, spacing: 0) {
+            if !rows.isEmpty {
+                Shelf(title: "Requested & on the way") {
+                    ForEach(rows, id: \.request.id) { row in
+                        RequestedCard(row: row)
+                    }
+                }
+            }
+        }
+        .task { await load() }
+        .onChange(of: feed.requests) { _, published in
+            // Only what can still change: an available request is in the
+            // library by now and already has a row of its own
+            rows = published.filter { $0.isSettling }
+        }
+    }
+
+    private func load() async {
+        guard seerr.isConfigured else { return }
+        // The poll runs every minute and home is usually the first thing
+        // seen, so take whatever it already has rather than show an empty
+        // row for up to a minute.
+        if !feed.requests.isEmpty {
+            rows = feed.requests.filter { $0.isSettling }
+            return
+        }
+        // nil means unreachable, which is not the same as "nothing
+        // requested" — leaving the row out beats inventing an answer
+        guard let all = try? await seerr.myRequestsDetailed(limit: 30) else { return }
+        rows = all.filter { $0.isSettling }
+    }
+}
+
+private struct RequestedCard: View {
+    let row: RequestedTitle
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            AsyncImage(
+                url: JellyseerrApi.companion.posterUrl(posterPath: row.posterPath, width: 342)
+                    .flatMap { URL(string: $0) }
+            ) { image in
+                image.resizable().scaledToFill()
+            } placeholder: {
+                Rectangle().fill(Color(white: 0.12))
+            }
+            .frame(width: PosterOverlayCard.width, height: PosterOverlayCard.height)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+            )
+
+            Text(row.displayTitle)
+                .font(.callout)
+                .foregroundStyle(.white)
+                .lineLimit(1)
+            Text(row.state.label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            // Only while something is moving: a bar on an approved
+            // request nobody has started fetching says nothing
+            if let progress = row.progress {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(.white.opacity(0.35))
+                        Capsule()
+                            .fill(progress.isStalled ? .white.opacity(0.45) : .white)
+                            .frame(width: geo.size.width * CGFloat(min(max(progress.fraction, 0), 1)))
+                    }
+                }
+                .frame(height: 4)
+                Text(progress.summary)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .frame(width: PosterOverlayCard.width, alignment: .leading)
+        // Focusable but not a button: there is nowhere to go from a
+        // request, and a shelf with nothing focusable in it cannot be
+        // scrolled with a remote
+        #if os(tvOS)
+        .focusable()
+        #endif
+    }
+}
+
+/**
+ * What the profile means to watch — including what the server does not
+ * have yet, which is the whole reason this is not Jellyfin's favourite
+ * flag.
+ */
+private struct WatchlistRow: View {
+    let api: JellyfinApi
+    /// Observed, not just held: adding a title from a detail screen two
+    /// pushes deeper has to move this row on the way back.
+    @ObservedObject var store: WatchlistStore
+    /// Whatever home already loaded, for the reconcile pass.
+    let onServer: [BaseItem]
+
+    @State private var cards: [WatchlistCard] = []
+
+    var body: some View {
+        // Never a Group: see RequestedRow — an EmptyView carries no task
+        VStack(alignment: .leading, spacing: 0) {
+            if !cards.isEmpty {
+                Shelf(title: "Watchlist") {
+                    ForEach(cards) { card in
+                        WatchlistCardView(api: api, card: card)
+                    }
+                }
+            }
+        }
+        .task(id: store.stamp) { await load() }
+    }
+
+    private func load() async {
+        // An entry added from search knows only a TMDb id, and nothing
+        // here can open one. This is where it picks up an item id, the
+        // first time the title turns up on the server.
+        store.reconcile(onServer: onServer)
+
+        let known = Dictionary(
+            onServer.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var resolved: [WatchlistCard] = []
+        // Capped: the row is a shelf, and each miss is a round trip
+        for entry in store.watchlist.entries.prefix(20) {
+            guard let itemId = entry.itemId else {
+                resolved.append(WatchlistCard(entry: entry, item: nil))
+                continue
+            }
+            if let item = known[itemId] {
+                resolved.append(WatchlistCard(entry: entry, item: item))
+            } else {
+                resolved.append(
+                    WatchlistCard(entry: entry, item: try? await api.getItem(itemId: itemId))
+                )
+            }
+            guard !Task.isCancelled else { return }
+        }
+        cards = resolved
+    }
+}
+
+private struct WatchlistCard: Identifiable {
+    let entry: WatchlistEntry
+    /// Nil while the title is still only a TMDb id: shown, not playable.
+    let item: BaseItem?
+    var id: String { entry.rowKey }
+}
+
+private struct WatchlistCardView: View {
+    let api: JellyfinApi
+    let card: WatchlistCard
+
+    var body: some View {
+        if let item = card.item {
+            NavigationLink(value: item) {
+                PosterOverlayCard(api: api, item: item)
+                    #if os(tvOS)
+                    .hoverEffect(.highlight)
+                    #endif
+            }
+            #if os(tvOS)
+            .buttonStyle(.borderless)
+            #else
+            .buttonStyle(.plain)
+            #endif
+        } else {
+            pending
+        }
+    }
+
+    /// Not on the server yet. It is still on the list — that is what a
+    /// watchlist is for — but there is nothing to open, so it is not a
+    /// target either.
+    private var pending: some View {
+        ZStack(alignment: .bottomLeading) {
+            AsyncImage(
+                url: JellyseerrApi.companion.posterUrl(posterPath: card.entry.posterPath, width: 342)
+                    .flatMap { URL(string: $0) }
+            ) { image in
+                image.resizable().scaledToFill()
+            } placeholder: {
+                Rectangle().fill(Color(white: 0.12))
+            }
+            .frame(width: PosterOverlayCard.width, height: PosterOverlayCard.height)
+            .clipped()
+
+            LinearGradient(
+                stops: [
+                    .init(color: .black.opacity(0.75), location: 0.0),
+                    .init(color: .black.opacity(0.25), location: 0.55),
+                    .init(color: .clear, location: 1.0),
+                ],
+                startPoint: .bottom,
+                endPoint: .top
+            )
+            .frame(height: PosterOverlayCard.height * 0.3)
+            .frame(maxHeight: .infinity, alignment: .bottom)
+
+            Text(card.entry.title)
+                .font(.caption.bold())
+                .foregroundStyle(.white.opacity(0.95))
+                .lineLimit(1)
+                #if os(tvOS)
+                .padding(14)
+                #else
+                .padding(8)
+                #endif
+        }
+        .frame(width: PosterOverlayCard.width, height: PosterOverlayCard.height)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+        )
+        // Same reason as the requested cards: focusable so the shelf can
+        // be panned, never a button, because there is nothing to open
+        #if os(tvOS)
+        .focusable()
+        #endif
+    }
+}
+
+/** Jellyfin's own favourite flag, shared with every other client. */
+private struct FavouritesRow: View {
+    let api: JellyfinApi
+
+    @State private var items: [BaseItem] = []
+
+    var body: some View {
+        // Never a Group: see RequestedRow — an EmptyView carries no task
+        VStack(alignment: .leading, spacing: 0) {
+            if !items.isEmpty {
+                LibraryRow(
+                    api: api,
+                    section: LibrarySection(
+                        title: "Favourites",
+                        key: "favourites",
+                        items: items
+                    )
+                )
+            }
+        }
+        // Kotlin default arguments do not bridge — the limit is spelled out
+        .task { items = (try? await api.getFavorites(limit: 24)) ?? [] }
     }
 }
 

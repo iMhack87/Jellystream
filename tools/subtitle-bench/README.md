@@ -22,6 +22,19 @@ Point a client at `http://10.0.2.2:8097` from the Android emulator, or
 
 The `.mkv` files are generated, never committed.
 
+## Favourites, watched state and search
+
+The bench keeps per-item favourite and watched state in memory, the way a
+real server keeps it per user, so a heart survives a scroll and the
+Favourites row has something to show. `POST` sets it and `DELETE` clears
+it, on `/Users/{id}/FavoriteItems/{itemId}` and `/PlayedItems/{itemId}`;
+marking something watched also clears its resume position, as the real
+server does. It is process memory: restart and everything is unhearted.
+
+`/Items` answers searches (and the `filters=IsFavorite` listing), over
+the films and the show — never episodes, since a search for a show should
+offer the show.
+
 ## A show whose next season is missing
 
 The same three files are served a second time as **season 1 of a show,

@@ -9,14 +9,24 @@ struct SeriesView: View {
     /// Only ever handed on to the player, for the end-of-episode offer —
     /// this is the screen its episodes are launched from.
     let seerr: JellyseerrApi
-    let series: BaseItem
+    /// State, not a `let`: the heart flips this copy before the server
+    /// has agreed, the same way the detail screen does.
+    @State private var series: BaseItem
 
     @State private var seasons: [BaseItem] = []
     @State private var selectedSeason: BaseItem?
     @State private var episodes: [BaseItem] = []
     @State private var error: String?
     @State private var playingItem: BaseItem?
+    /// A refused flag says so in place, never as an alert.
+    @State private var notice: String?
     @Environment(\.appSettings) private var appSettings
+
+    init(api: JellyfinApi, seerr: JellyseerrApi, series: BaseItem) {
+        self.api = api
+        self.seerr = seerr
+        _series = State(initialValue: series)
+    }
 
     #if os(tvOS)
     private let headerHeight: CGFloat = 360
@@ -28,6 +38,8 @@ struct SeriesView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 header
+
+                seriesActions
 
                 if let error {
                     Text(error)
@@ -106,6 +118,72 @@ struct SeriesView: View {
         .frame(height: headerHeight)
     }
 
+    /// Below the header rather than inside it: buttons over the backdrop
+    /// would sit between the title and the season pills in the tvOS focus
+    /// order, and the header is centred while everything else is not.
+    private var seriesActions: some View {
+        HStack(spacing: 20) {
+            Button {
+                toggleFavorite()
+            } label: {
+                Image(systemName: series.isFavorite ? "heart.fill" : "heart")
+                    .font(.title3)
+            }
+            #if !os(tvOS)
+            .buttonStyle(.plain)
+            .foregroundStyle(.white)
+            #endif
+            .accessibilityLabel(series.isFavorite ? "Remove favourite" : "Add favourite")
+
+            WatchlistButton(entry: WatchlistEntry.companion.of(item: series))
+
+            if let notice {
+                Text(notice)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, HomeMetrics.edgePadding)
+    }
+
+    /// Optimistic, then put back if the server says no — the detail
+    /// screen's rule, and the Android twin's.
+    private func toggleFavorite() {
+        let wanted = !series.isFavorite
+        let before = series
+        series = series.withFavorite(favorite: wanted)
+        notice = nil
+        Task {
+            // The bridge boxes a Kotlin Boolean; false is also what a thrown
+            // error means here — either way the server did not take it
+            let ok = (try? await api.setFavorite(itemId: before.id, favorite: wanted))?.boolValue ?? false
+            if !ok {
+                series = before
+                notice = "Couldn't reach the server"
+            }
+        }
+    }
+
+    /// The long press on an episode card. A short press still plays.
+    private func toggleWatched(_ episode: BaseItem) {
+        let wanted = !episode.isWatched
+        let before = episode
+        replace(before.withWatched(watched: wanted))
+        notice = nil
+        Task {
+            let ok = (try? await api.setWatched(itemId: before.id, watched: wanted))?.boolValue ?? false
+            if !ok {
+                replace(before)
+                notice = "Couldn't reach the server"
+            }
+        }
+    }
+
+    private func replace(_ updated: BaseItem) {
+        guard let index = episodes.firstIndex(where: { $0.id == updated.id }) else { return }
+        episodes[index] = updated
+    }
+
     private var seasonPills: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 14) {
@@ -166,6 +244,14 @@ struct SeriesView: View {
                     #else
                     .buttonStyle(.plain)
                     #endif
+                    // Long press, which is what .contextMenu is on a
+                    // touch screen AND on the Siri Remote — the Android
+                    // twin uses combinedClickable(onLongClick=) for it
+                    .contextMenu {
+                        Button(episode.isWatched ? "Mark as unwatched" : "Mark as watched") {
+                            toggleWatched(episode)
+                        }
+                    }
                 }
             }
             .padding(.horizontal, HomeMetrics.edgePadding)
@@ -181,8 +267,11 @@ struct SeriesView: View {
  * Touch-platform season pill: selected = solid white capsule, black text.
  * tvOS uses untouched system buttons instead (Liquid Glass + Focus
  * Engine own the visuals there; selection is a checkmark in the label).
+ *
+ * Not private: the unified search screen's two filter rows are the same
+ * control in the same place, and two pill styles would drift apart.
  */
-private struct SeasonPillStyle: ButtonStyle {
+struct SeasonPillStyle: ButtonStyle {
     let selected: Bool
 
     func makeBody(configuration: Configuration) -> some View {

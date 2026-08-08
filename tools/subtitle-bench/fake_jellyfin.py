@@ -81,6 +81,29 @@ EPISODES = [
 BY_ID = {i["id"]: i for i in ITEMS}
 BY_ID.update({e["id"]: e for e in EPISODES})
 
+# Favourites and watched state, which real Jellyfin keeps per user and
+# shares with every other client. Held here so a heart tapped in the app
+# is still there after a scroll, and so the Favourites row has something
+# to show.
+USER_DATA = {}
+
+
+def user_data(item_id):
+    state = USER_DATA.get(item_id, {})
+    return {
+        "PlaybackPositionTicks": state.get("position", 0),
+        "Played": state.get("played", False),
+        "IsFavorite": state.get("favorite", False),
+    }
+
+
+def set_user_data(item_id, key, value):
+    USER_DATA.setdefault(item_id, {})[key] = value
+    # Marking something watched clears its resume position, exactly as the
+    # real server does — otherwise it stays in Continue Watching for ever
+    if key == "played" and value:
+        USER_DATA[item_id]["position"] = 0
+
 
 def streams(item):
     out = [{"Index": 0, "Type": "Video", "Codec": "h264"}]
@@ -108,7 +131,7 @@ def dto(item):
         "RunTimeTicks": 40 * TICKS,
         "Overview": "Subtitle bench fixture.",
         "MediaStreams": streams(item),
-        "UserData": {"PlaybackPositionTicks": 0, "Played": False},
+        "UserData": user_data(item["id"]),
     }
 
 
@@ -126,7 +149,7 @@ def series_dto(with_provider_ids):
         "Type": "Series",
         "ProductionYear": 2022,
         "Overview": "Season 1 is here; season 2 is the point of the bench.",
-        "UserData": {"PlaybackPositionTicks": 0, "Played": False},
+        "UserData": user_data(SERIES_ID),
     }
     if with_provider_ids:
         payload["ProviderIds"] = {"Tmdb": SERIES_TMDB, "Imdb": "tt11280740"}
@@ -141,7 +164,7 @@ def season_dto():
         "IndexNumber": 1,
         "SeriesId": SERIES_ID,
         "SeriesName": SERIES_NAME,
-        "UserData": {"PlaybackPositionTicks": 0, "Played": False},
+        "UserData": user_data(SEASON_ID),
     }
 
 
@@ -158,7 +181,7 @@ def episode_dto(episode):
         "Overview": "Forty seconds, so the end of a season arrives quickly.",
         "PremiereDate": "2022-02-18T00:00:00.0000000Z",
         "MediaStreams": streams(episode),
-        "UserData": {"PlaybackPositionTicks": 0, "Played": False},
+        "UserData": user_data(episode["id"]),
     }
 
 
@@ -211,7 +234,38 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
+        if self._user_item_action(path, adding=True):
+            return
         return self._json({}, 404)
+
+    def do_DELETE(self):
+        if self._user_item_action(self.path.split("?")[0], adding=False):
+            return
+        return self._json({}, 404)
+
+    def _user_item_action(self, path, adding):
+        """Favourites and watched state — POST to set, DELETE to clear.
+
+        Real Jellyfin answers with the new UserItemDataDto, and the app
+        only checks the status code, but sending it back keeps the bench
+        honest for anything that starts reading it.
+        """
+        m = re.match(r"^/Users/[^/]+/(FavoriteItems|PlayedItems)/([^/]+)$", path)
+        if not m:
+            return False
+        key = "favorite" if m.group(1) == "FavoriteItems" else "played"
+        set_user_data(m.group(2), key, adding)
+        self._json(user_data(m.group(2)))
+        return True
+
+    def _all_items(self, with_provider_ids=False):
+        """Everything searchable: the films and the show, never episodes.
+
+        ProviderIds only when `fields` asks for it, exactly as real
+        Jellyfin behaves — which is what lets the unified search match a
+        library title to a Jellyseerr one by id instead of by name.
+        """
+        return [dto(i) for i in ITEMS] + [series_dto(with_provider_ids)]
 
     def do_GET(self):
         path = self.path.split("?")[0]
@@ -256,6 +310,25 @@ class Handler(BaseHTTPRequestHandler):
             )
         if path.endswith("/Items/Resume") or path == "/Shows/NextUp":
             return self._json({"Items": [], "TotalRecordCount": 0})
+
+        # Search, and the Favourites row — both are /Users/{id}/Items with
+        # query parameters, so they have to be matched before the
+        # single-item route below claims the path.
+        if re.match(r"^/(Users/[^/]+/)?Items$", path):
+            query = self._query()
+            wants_ids = "ProviderIds" in query.get("fields", [""])[0]
+            items = self._all_items(with_provider_ids=wants_ids)
+            if "IsFavorite" in query.get("filters", [""])[0]:
+                items = [i for i in items if i["UserData"]["IsFavorite"]]
+            term = (query.get("searchTerm", [""])[0] or "").lower()
+            if term:
+                items = [i for i in items if term in i["Name"].lower()]
+            kinds = query.get("includeItemTypes", [""])[0]
+            if kinds:
+                wanted = set(kinds.split(","))
+                items = [i for i in items if i["Type"] in wanted]
+            limit = int(query.get("limit", ["100"])[0])
+            return self._json({"Items": items[:limit], "TotalRecordCount": len(items)})
 
         m = re.match(r"^/Shows/([^/]+)/Seasons$", path)
         if m:

@@ -61,6 +61,21 @@ so a client that reads "2xx means sent" tells people their season is on
 the way when nothing was created. The bench answers 202 precisely so
 that client fails here instead of in someone's living room.
 
+## Things actually arrive
+
+A download that runs out of time makes its title **available**, which is
+the moment the arrival notice exists for. Sicario lands about 3 minutes
+in, Game of Thrones between 3 and 7.
+
+Three minutes is a long time to wait for one toast:
+
+```bash
+curl -X POST localhost:5055/api/v1/bench/land/242582
+```
+
+That marks the title, and every season anybody asked for, as available
+right now.
+
 ## State, and getting it back
 
 Every request mutates the fixtures in place, so after one E2E run the
