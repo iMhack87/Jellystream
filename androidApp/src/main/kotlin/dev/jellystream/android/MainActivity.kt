@@ -63,6 +63,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
@@ -1432,9 +1433,67 @@ private fun LibraryRow(api: JellyfinApi, section: LibrarySection, onOpen: (BaseI
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             items(section.items, key = { it.id }) { item ->
-                PosterCard(api, item, onOpen)
+                if (section.key == "genres") {
+                    GenreCard(api, item, onOpen)
+                } else {
+                    PosterCard(api, item, onOpen)
+                }
             }
         }
+    }
+}
+
+/**
+ * Landscape tile for a genre. Jellyfin's genre Primary is a collage of
+ * posters: a 2:3 crop slices through the mosaic. The name is the subject.
+ */
+@Composable
+private fun GenreCard(api: JellyfinApi, item: BaseItem, onOpen: (BaseItem) -> Unit) {
+    Box(
+        modifier = Modifier
+            .width(248.dp)
+            .height(140.dp)
+            .dpadFocusEffect(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(12.dp))
+            .background(CinemaColors.SurfaceVariant)
+            .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
+            .clickable(enabled = item.isBrowsable) { onOpen(item) },
+    ) {
+        AsyncImage(
+            model = api.imageUrl(item, 800),
+            contentDescription = item.name,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .fillMaxSize()
+                .blur(6.dp),
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.4f)),
+        )
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .height(80.dp)
+                .background(
+                    Brush.verticalGradient(
+                        0.0f to Color.Transparent,
+                        1.0f to Color.Black.copy(alpha = 0.8f),
+                    ),
+                ),
+        )
+        Text(
+            item.name.orEmpty().replaceFirstChar { it.titlecase() },
+            style = MaterialTheme.typography.titleMedium,
+            color = Color.White,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(12.dp),
+        )
     }
 }
 

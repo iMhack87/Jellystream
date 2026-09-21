@@ -10,6 +10,10 @@ struct LibrarySection: Identifiable {
     /// The two rows that are drawn as landscape cards with a progress
     /// bar, and the two the new rows have to come after.
     var isContinue: Bool { key == "resume" || key == "nextup" }
+
+    /// Jellyfin's genre Primary is a landscape collage of posters. Cropping
+    /// it to a 2:3 tile slices through the mosaic and looks broken.
+    var isGenres: Bool { key == "genres" }
 }
 
 struct HomeView: View {
@@ -594,13 +598,16 @@ private struct LibraryRow: View {
                 LazyHStack(alignment: .top, spacing: HomeMetrics.cardSpacing) {
                     ForEach(section.items, id: \.id) { item in
                         NavigationLink(value: item) {
-                            // Apple TV store card: the caption lives inside
-                            // the artwork on a bottom scrim — no sibling
-                            // text (Continue/Next Up rows keep theirs)
-                            PosterOverlayCard(api: api, item: item)
-                                #if os(tvOS)
-                                .hoverEffect(.highlight)
-                                #endif
+                            Group {
+                                if section.isGenres {
+                                    GenreCard(api: api, item: item)
+                                } else {
+                                    PosterOverlayCard(api: api, item: item)
+                                }
+                            }
+                            #if os(tvOS)
+                            .hoverEffect(.highlight)
+                            #endif
                         }
                         .disabled(!item.isBrowsable)
                         #if os(tvOS)
@@ -932,6 +939,60 @@ private struct FavouritesRow: View {
         // Kotlin default arguments do not bridge — the limit is spelled out
         .padding(.bottom, items.isEmpty ? HomeMetrics.hiddenRowSpacing : 0)
         .task { items = (try? await api.getFavorites(limit: 24)) ?? [] }
+    }
+}
+
+/**
+ * Landscape tile for a genre. The artwork is atmosphere: Jellyfin ships a
+ * collage, and the name is what you actually pick.
+ */
+private struct GenreCard: View {
+    let api: JellyfinApi
+    let item: BaseItem
+
+    #if os(tvOS)
+    static let width: CGFloat = 440
+    static let height: CGFloat = 248
+    #else
+    static let width: CGFloat = 250
+    static let height: CGFloat = 141
+    #endif
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            AsyncImage(url: api.imageUrl(item: item, maxWidth: 800).flatMap { URL(string: $0) }) { image in
+                image.resizable().scaledToFill().blur(radius: 6)
+            } placeholder: {
+                Rectangle().fill(Color(white: 0.12))
+            }
+            .frame(width: Self.width, height: Self.height)
+            .clipped()
+
+            Color.black.opacity(0.4)
+
+            LinearGradient(
+                colors: [.black.opacity(0.85), .clear],
+                startPoint: .bottom,
+                endPoint: .center
+            )
+
+            Text((item.name ?? "").localizedCapitalized)
+                .font(.title3.bold())
+                .foregroundStyle(.white)
+                .lineLimit(2)
+                .shadow(color: .black.opacity(0.7), radius: 6, y: 1)
+                #if os(tvOS)
+                .padding(18)
+                #else
+                .padding(12)
+                #endif
+        }
+        .frame(width: Self.width, height: Self.height)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+        )
     }
 }
 

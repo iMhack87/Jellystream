@@ -47,6 +47,7 @@ Signature Apple : équipe **B35G5Y85U9** (ZEF Computers, `contact@zefcomputers.c
 - **AirPlay / Chromecast ne Direct Play pas le MKV.** L'écran lointain reçoit un HLS (`getPlaybackPlan(..., forceTranscode=true)`). Le token pour un client sans header est `ApiKey=` (Jellyfin 10.12 ignore `api_key=`). Cast utilise le Default Media Receiver (`CC1AD845`), pas le receiver GPL Jellyfin. AirPlay = `AVPlayerViewController` côté iOS uniquement — mpv ne parle pas AirPlay.
 - **libmpv Android** : `dev.jdtech.mpv:libmpv` (MIT). Ne pas copier le wrapper GPL de Findroid. C'est un secours après un refus Media3, avant le transcodage.
 - **L’UI suit la langue du système via `Copy`** (`shared/.../Copy.kt` + `currentLanguageTag()`). Pas de `strings.xml` ni de `Localizable.xcstrings` : un littéral anglais dans Compose/SwiftUI reste anglais même si le Mac/téléphone est en français. Toute nouvelle chaîne visible passe par `Copy`. Les tests qui assertent un libellé doivent comparer à `Copy.*`, pas à une phrase anglaise — la machine de Matthieu est en français, et c’est ce qui a fait échouer les tests au premier passage.
+- **Les images de genre Jellyfin sont un collage paysage.** Un poster 2:3 coupe le mosaïque (bandeau de posters illisibles). La rangée Genres est en cartes 16:9, nom par-dessus.
 - **`fields=People,Chapters,Trickplay,GenreItems`** n'arrive que sur `getItem`. Un DTO de liste n'a que les noms de genres, pas les ids.
 
 ## Vérification E2E (simulateur / émulateur)
