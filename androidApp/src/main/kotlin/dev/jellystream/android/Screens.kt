@@ -36,7 +36,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
+
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -949,7 +949,7 @@ fun SearchScreen(
         }
 
         if (searching) {
-            CircularProgressIndicator(modifier = Modifier.padding(16.dp).size(24.dp))
+            CinemaSpinner(modifier = Modifier.padding(16.dp), size = 22.dp)
         }
 
         LazyColumn(

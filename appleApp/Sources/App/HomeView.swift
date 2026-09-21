@@ -269,7 +269,7 @@ struct HomeView: View {
                 }
                 .ignoresSafeArea(edges: .top)
             } else {
-                ProgressView()
+                CinemaLoading()
             }
         }
         .background(Color.black)

@@ -42,7 +42,7 @@ struct SeasonPickerView: View {
     var body: some View {
         List {
             if loading {
-                Section { ProgressView() }
+                Section { CinemaSpinner().frame(maxWidth: .infinity).padding(.vertical, 16) }
             } else if let details {
                 Section {
                     // Under the year and above the rows, where Android puts

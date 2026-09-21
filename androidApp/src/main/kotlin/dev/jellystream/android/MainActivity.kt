@@ -42,7 +42,6 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -765,7 +764,7 @@ private fun LoginScreen(
             )
         }
 
-        if (loading) CircularProgressIndicator()
+        if (loading) CinemaSpinner()
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
 
@@ -991,13 +990,7 @@ private fun HomeScreen(
                 }
             }
         }
-        sections == null -> Column(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            CircularProgressIndicator()
-        }
+        sections == null -> CinemaLoading()
         else -> {
             // Hero must be openable: first playable item or series across sections
             val hero = sections!!.asSequence()

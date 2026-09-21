@@ -25,7 +25,7 @@ struct CatalogView: View {
             if let error {
                 Text(error).foregroundStyle(.secondary).padding(24)
             } else if !loaded {
-                ProgressView()
+                CinemaLoading()
             } else if items.isEmpty {
                 Text(Copy.shared.nothingInHere).foregroundStyle(.secondary).padding(24)
             } else {

@@ -672,7 +672,7 @@ struct ConnectView: View {
         case .idle:
             EmptyView()
         case .loading:
-            ProgressView()
+            CinemaSpinner()
         case .failure(let message):
             Text(message).foregroundStyle(.red)
         }

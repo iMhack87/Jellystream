@@ -1,4 +1,5 @@
 import SwiftUI
+import Shared
 #if os(macOS)
 import AppKit
 #else
@@ -76,5 +77,38 @@ extension View {
             .scrollContentBackground(.hidden)
             .formStyle(.grouped)
             #endif
+    }
+}
+
+/// Thin rotating arc. The system ProgressView on macOS is a spinning
+/// glyph in a square — it sits on the cinema black like a leftover.
+struct CinemaSpinner: View {
+    var size: CGFloat = 28
+    @State private var turning = false
+
+    var body: some View {
+        Circle()
+            .trim(from: 0.08, to: 0.82)
+            .stroke(
+                Color.white.opacity(0.85),
+                style: StrokeStyle(lineWidth: max(2, size / 12), lineCap: .round)
+            )
+            .frame(width: size, height: size)
+            .rotationEffect(.degrees(turning ? 360 : 0))
+            .onAppear {
+                withAnimation(.linear(duration: 0.85).repeatForever(autoreverses: false)) {
+                    turning = true
+                }
+            }
+            .accessibilityLabel(Copy.shared.loading)
+    }
+}
+
+/// Full-screen hold: spinner centred on cinema black.
+struct CinemaLoading: View {
+    var body: some View {
+        CinemaSpinner()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Cinema.background)
     }
 }

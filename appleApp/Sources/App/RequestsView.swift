@@ -39,7 +39,7 @@ struct RequestsView: View {
                     }
                 }
             } else if searching {
-                Section { ProgressView() }
+                Section { CinemaSpinner().frame(maxWidth: .infinity).padding(.vertical, 16) }
             } else if results.isEmpty {
                 Section { Text(Copy.shared.nothingFound(query: query)).foregroundStyle(.secondary) }
             } else {

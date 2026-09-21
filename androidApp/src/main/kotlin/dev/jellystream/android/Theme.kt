@@ -1,8 +1,17 @@
 package dev.jellystream.android
 
 import android.content.pm.PackageManager
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
@@ -13,19 +22,28 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import dev.jellystream.shared.Copy
 
 /** Cinematic palette: deep blacks, white CTAs, muted grays — Apple TV+ mood. */
 object CinemaColors {
@@ -139,4 +157,41 @@ fun Modifier.dpadFocusEffect(
         .then(
             if (focused) Modifier.border(3.dp, Color.White, shape) else Modifier
         )
+}
+
+/** Thin rotating arc. Material's CircularProgressIndicator is a thick
+ *  branded ring that doesn't belong on the cinema black. */
+@Composable
+fun CinemaSpinner(modifier: Modifier = Modifier, size: Dp = 28.dp) {
+    val spin = rememberInfiniteTransition(label = "cinemaSpinner")
+    val angle by spin.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(850, easing = LinearEasing)),
+        label = "spin",
+    )
+    Canvas(
+        modifier
+            .size(size)
+            .semantics { contentDescription = Copy.loading },
+    ) {
+        val stroke = (size.toPx() / 12f).coerceAtLeast(2f)
+        val inset = stroke / 2f
+        drawArc(
+            color = Color.White.copy(alpha = 0.85f),
+            startAngle = angle,
+            sweepAngle = 270f,
+            useCenter = false,
+            topLeft = Offset(inset, inset),
+            size = Size(this.size.width - stroke, this.size.height - stroke),
+            style = Stroke(width = stroke, cap = StrokeCap.Round),
+        )
+    }
+}
+
+@Composable
+fun CinemaLoading(modifier: Modifier = Modifier) {
+    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        CinemaSpinner()
+    }
 }

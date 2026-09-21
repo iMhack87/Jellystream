@@ -20,7 +20,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -84,9 +83,12 @@ fun CatalogScreen(
                     color = CinemaColors.TextSecondary,
                     modifier = Modifier.padding(24.dp),
                 )
-                items == null -> CircularProgressIndicator(
-                    modifier = Modifier.align(Alignment.CenterHorizontally).padding(48.dp),
-                )
+                items == null -> Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CinemaSpinner()
+                }
                 items!!.isEmpty() -> Text(
                     Copy.nothingInHere,
                     color = CinemaColors.TextSecondary,
