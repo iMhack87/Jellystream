@@ -493,10 +493,24 @@ private fun SignedInApp(
             }
 
             playing?.let { item ->
-                // The player needs Jellyseerr too: finishing the last
-                // episode a season has is where asking for the next one
-                // actually occurs to someone
-                PlayerScreen(api, seerr, item, onClose = { playing = null })
+                // key(): playing the next episode swaps this item, and the
+                // player must come back as if it had just been opened —
+                // fresh ExoPlayer, fresh plan, fresh end-of-episode state.
+                // Without it the old surface would keep the previous plan
+                // until the new one arrived, and the card that started the
+                // whole thing would still be on screen.
+                key(item.id) {
+                    // The player needs Jellyseerr too: finishing the last
+                    // episode a season has is where asking for the next one
+                    // actually occurs to someone
+                    PlayerScreen(
+                        api,
+                        seerr,
+                        item,
+                        onClose = { playing = null },
+                        onPlayNext = { playing = it },
+                    )
+                }
             }
         }
     }

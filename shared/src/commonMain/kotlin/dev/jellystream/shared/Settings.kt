@@ -47,11 +47,25 @@ data class AppSettings(
 
     /** Subtitle size, 1.0 being the player's own. */
     val subtitleScale: Double = 1.0,
+
+    /**
+     * Play the next episode on its own when one runs out, after a visible
+     * countdown the viewer can stop.
+     *
+     * On by default — it is what every player people already use does, and
+     * a card that waits for a press is a card that stops a series dead at
+     * 1 a.m. Off leaves the same card up with no countdown, so the offer
+     * never disappears, only the deciding-for-you part does.
+     */
+    val autoPlayNextEpisode: Boolean = true,
 ) {
     // Kotlin default arguments and data-class copy() don't survive the
     // bridge to Swift, so every mutation gets a named helper here rather
     // than a copy() call site the Apple app can't spell.
     fun withAlwaysTranscode(value: Boolean): AppSettings = copy(alwaysTranscode = value)
+
+    fun withAutoPlayNextEpisode(value: Boolean): AppSettings =
+        copy(autoPlayNextEpisode = value)
 
     /** Does this library belong on the home screen? */
     fun showsLibrary(view: BaseItem): Boolean =

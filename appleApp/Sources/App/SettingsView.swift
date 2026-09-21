@@ -119,6 +119,13 @@ struct SettingsView: View {
         )
     }
 
+    private var autoPlayNextEpisode: Binding<Bool> {
+        Binding(
+            get: { settings.autoPlayNextEpisode },
+            set: { onChange(settings.withAutoPlayNextEpisode(value: $0)) }
+        )
+    }
+
     var body: some View {
         Form {
             Section {
@@ -233,12 +240,16 @@ struct SettingsView: View {
             }
 
             Section {
+                Toggle("Play Next Episode Automatically", isOn: autoPlayNextEpisode)
                 Toggle("Always Transcode", isOn: alwaysTranscode)
             } header: {
                 Text("Playback")
             } footer: {
                 Text(
-                    "Direct Play sends the original file untouched — leave this off. "
+                    "When an episode ends, the next one starts after a ten-second "
+                    + "countdown you can stop. Off keeps the same card and the same "
+                    + "button — it just waits for you.\n\n"
+                    + "Direct Play sends the original file untouched — leave this off. "
                     + "Turn it on only if a title stutters or won't decode: the server "
                     + "will re-encode it, at the cost of CPU and quality."
                 )

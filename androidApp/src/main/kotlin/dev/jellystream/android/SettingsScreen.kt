@@ -265,6 +265,14 @@ fun SettingsScreen(
             item(key = "playback") {
                 SettingsSection("Playback") {
                     SettingsToggle(
+                        title = "Play next episode automatically",
+                        subtitle = "When an episode ends, the next one starts after a "
+                            + "ten-second countdown you can stop. Off keeps the same "
+                            + "card and the same button — it just waits for you.",
+                        checked = settings.autoPlayNextEpisode,
+                        onCheckedChange = { onChange(settings.withAutoPlayNextEpisode(it)) },
+                    )
+                    SettingsToggle(
                         title = "Always transcode",
                         subtitle = "Direct Play sends the original file untouched — leave "
                             + "this off. Turn it on only if a title stutters or won't "
