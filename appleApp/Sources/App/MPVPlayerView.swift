@@ -614,7 +614,17 @@ private struct PlayerHost: View {
 
             #if os(tvOS)
             if showTracks {
-                TrackPanel(model: model)
+                TrackPanel(
+                    model: model,
+                    onInfo: {
+                        showTracks = false
+                        showStats.toggle()
+                    },
+                    onChapters: chapters.isEmpty ? nil : {
+                        showTracks = false
+                        showChapters = true
+                    }
+                )
             }
             #endif
 
@@ -640,16 +650,6 @@ private struct PlayerHost: View {
             }
 
             #if os(tvOS)
-            if !showTracks && !showOffer {
-                HStack(spacing: 20) {
-                    Button("Info") { showStats.toggle() }
-                    if !chapters.isEmpty {
-                        Button("Chapters") { showChapters.toggle() }
-                    }
-                }
-                .padding(28)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-            }
             if showStats {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(model.stats.lines(), id: \.self) { line in
@@ -694,7 +694,7 @@ private struct PlayerHost: View {
         // Never steal focus while another overlay is open — the pill is
         // hidden then, and re-grabs when that overlay closes mid-segment.
         .onChange(of: model.skipSegment == nil) { _, isNil in
-            skipFocused = !isNil && !showTracks && !showOffer
+            skipFocused = !isNil && !showTracks && !showOffer && !showChapters
         }
         .onChange(of: showTracks) { _, open in
             if !open && !showOffer && model.skipSegment != nil {
@@ -788,7 +788,7 @@ private struct PlayerHost: View {
             // yields to the track panel — one overlay owns the Focus Engine
             // at a time (same discipline as .focusable(!showTracks)).
             #if os(tvOS)
-            let skipPillHidden = showTracks || showOffer
+            let skipPillHidden = showTracks || showOffer || showChapters
             #else
             // No Focus Engine to fight over here, but a Skip Credits pill
             // underneath the offer card is still two answers to one question
@@ -1270,9 +1270,17 @@ private struct PlayerHost: View {
 /** Focusable audio/subtitle picker — swipe down on the remote to open. */
 private struct TrackPanel: View {
     @ObservedObject var model: PlayerModel
+    var onInfo: () -> Void
+    var onChapters: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
+            HStack(spacing: 16) {
+                Button("Info", action: onInfo)
+                if let onChapters {
+                    Button("Chapters", action: onChapters)
+                }
+            }
             if model.audioTracks.count > 1 {
                 Text("Audio").font(.headline)
                 ScrollView(.horizontal, showsIndicators: false) {

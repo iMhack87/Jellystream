@@ -10,9 +10,15 @@ struct CatalogView: View {
     @State private var error: String?
     @State private var loaded = false
 
+    #if os(tvOS)
     private let columns = [
-        GridItem(.adaptive(minimum: 120), spacing: 16),
+        GridItem(.adaptive(minimum: 220), spacing: HomeMetrics.cardSpacing),
     ]
+    #else
+    private let columns = [
+        GridItem(.adaptive(minimum: 140), spacing: 16),
+    ]
+    #endif
 
     var body: some View {
         Group {
@@ -33,7 +39,7 @@ struct CatalogView: View {
                                     } placeholder: {
                                         Rectangle().fill(Color(white: 0.12))
                                     }
-                                    .frame(height: 180)
+                                    .aspectRatio(2 / 3, contentMode: .fit)
                                     .clipShape(RoundedRectangle(cornerRadius: 10))
                                     Text(child.name ?? "")
                                         .font(.caption)
@@ -118,7 +124,11 @@ struct PersonRow: View {
                                         } placeholder: {
                                             Circle().fill(Color(white: 0.18))
                                         }
+                                        #if os(tvOS)
+                                        .frame(width: 110, height: 110)
+                                        #else
                                         .frame(width: 72, height: 72)
+                                        #endif
                                         .clipShape(Circle())
                                         Text(person.name ?? "")
                                             .font(.caption)
@@ -128,10 +138,11 @@ struct PersonRow: View {
                                             Text(role)
                                                 .font(.caption2)
                                                 .foregroundStyle(.secondary)
-                                                .lineLimit(1)
+                                                .lineLimit(2)
+                                                .multilineTextAlignment(.center)
                                         }
                                     }
-                                    .frame(width: 84)
+                                    .frame(width: 96)
                                 }
                                 #if os(tvOS)
                                 .buttonStyle(.borderless)

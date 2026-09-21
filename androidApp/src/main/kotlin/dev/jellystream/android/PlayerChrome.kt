@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -96,6 +97,7 @@ fun ChapterStrip(
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
                             .fillMaxWidth()
+                            .aspectRatio(16f / 9f)
                             .clip(RoundedCornerShape(6.dp))
                             .background(CinemaColors.SurfaceVariant),
                     )
@@ -116,6 +118,7 @@ fun ChapterStrip(
 fun PlayerToolRow(
     onToggleStats: () -> Unit,
     onChapters: (() -> Unit)?,
+    showCast: Boolean,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -140,6 +143,8 @@ fun PlayerToolRow(
                 Text("Chapters", color = Color.White)
             }
         }
-        CastRouteButton()
+        if (showCast) {
+            CastRouteButton()
+        }
     }
 }

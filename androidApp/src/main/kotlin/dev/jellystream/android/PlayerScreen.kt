@@ -237,6 +237,22 @@ fun PlayerScreen(
 
     BackHandler(onBack = onClose)
 
+    val context = LocalContext.current
+    val isTv = remember {
+        context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+    }
+    var chromeVisible by remember { mutableStateOf(false) }
+    var showStats by remember { mutableStateOf(false) }
+    var showChapters by remember { mutableStateOf(false) }
+    var chapters by remember { mutableStateOf<List<ChapterInfo>>(emptyList()) }
+    var trickplay by remember { mutableStateOf<TrickplayInfo?>(null) }
+    var seekMedia by remember { mutableStateOf<(Double) -> Unit>({}) }
+    LaunchedEffect(item.id) {
+        val full = runCatching { api.getItem(item.id) }.getOrNull()
+        chapters = full?.chapters.orEmpty()
+        trickplay = Trickplay.pick(full?.trickplay, plan?.mediaSourceId)
+    }
+
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         val currentPlan = plan
         if (failed) {
@@ -266,6 +282,8 @@ fun PlayerScreen(
                     nextEpisode = nextEpisode,
                     useMpv = useMpv,
                     onPlayNext = onPlayNext,
+                    onChromeVisible = { chromeVisible = it },
+                    onSeekReady = { seekMedia = it },
                     onDirectPlayFailed = {
                         if (!useMpv && !currentPlan.isTranscode) {
                             useMpv = true
@@ -288,6 +306,41 @@ fun PlayerScreen(
             contentDescription = "Close player",
             modifier = Modifier.align(Alignment.TopStart),
         )
+        // Same Box as the close button: PlayerView swallows taps inside
+        // PlayerSurface, so Info/Chapters have to sit here, as siblings.
+        if (chromeVisible && currentPlan != null) {
+            PlayerToolRow(
+                onToggleStats = { showStats = !showStats },
+                onChapters = if (chapters.isNotEmpty()) {{ showChapters = true }} else null,
+                showCast = !isTv,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 16.dp, end = 12.dp),
+            )
+        }
+        if (showStats && currentPlan != null) {
+            StatsOverlay(
+                stats = currentPlan.stats,
+                usingMpv = useMpv,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(start = 72.dp, top = 16.dp),
+            )
+        }
+        if (showChapters && chapters.isNotEmpty()) {
+            ChapterStrip(
+                api = api,
+                itemId = item.id,
+                chapters = chapters,
+                trickplay = trickplay,
+                onSeek = { seconds ->
+                    seekMedia(seconds)
+                    showChapters = false
+                },
+                onClose = { showChapters = false },
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        }
     }
 }
 
@@ -303,6 +356,8 @@ private fun PlayerSurface(
     nextEpisode: NextEpisodeOffer?,
     useMpv: Boolean,
     onPlayNext: (BaseItem) -> Unit,
+    onChromeVisible: (Boolean) -> Unit,
+    onSeekReady: ((Double) -> Unit) -> Unit,
     onDirectPlayFailed: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -339,15 +394,6 @@ private fun PlayerSurface(
         settings.chooseSubtitle(plan.subtitleStreams, plan.audioLanguage)
     }
 
-    var showStats by remember { mutableStateOf(false) }
-    var showChapters by remember { mutableStateOf(false) }
-    var chapters by remember { mutableStateOf<List<ChapterInfo>>(emptyList()) }
-    var trickplay by remember { mutableStateOf<TrickplayInfo?>(null) }
-    LaunchedEffect(item.id) {
-        val full = runCatching { api.getItem(item.id) }.getOrNull()
-        chapters = full?.chapters.orEmpty()
-        trickplay = Trickplay.pick(full?.trickplay, plan.mediaSourceId)
-    }
     val activity = context as? android.app.Activity
     DisposableEffect(plan.stats.frameRate) {
         applyDisplayRefresh(activity, plan.stats.frameRate)
@@ -512,6 +558,7 @@ private fun PlayerSurface(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
+        var playerView by remember { mutableStateOf<PlayerView?>(null) }
         AndroidView(
             modifier = Modifier.fillMaxSize().background(Color.Black),
             factory = { ctx ->
@@ -526,9 +573,22 @@ private fun PlayerSurface(
                     subtitleView?.setFractionalTextSize(
                         SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * subtitleScale.toFloat()
                     )
+                    playerView = this
                 }
             },
         )
+        LaunchedEffect(playerView) {
+            val view = playerView ?: return@LaunchedEffect
+            while (true) {
+                onChromeVisible(view.isControllerFullyVisible)
+                delay(200)
+            }
+        }
+        LaunchedEffect(player) {
+            onSeekReady { seconds ->
+                player.seekTo(((seconds - positionOffsetSeconds) * 1000).toLong())
+            }
+        }
 
         // Our own cue layer, above the video and below the controls. Only
         // ever drawn while a shift is in effect.
@@ -554,37 +614,6 @@ private fun PlayerSurface(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(12.dp),
-            )
-        }
-
-        PlayerToolRow(
-            onToggleStats = { showStats = !showStats },
-            onChapters = if (chapters.isNotEmpty()) {{ showChapters = true }} else null,
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 72.dp, end = 12.dp),
-        )
-        if (showStats) {
-            StatsOverlay(
-                stats = plan.stats,
-                usingMpv = false,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(start = 72.dp, top = 16.dp),
-            )
-        }
-        if (showChapters && chapters.isNotEmpty()) {
-            ChapterStrip(
-                api = api,
-                itemId = item.id,
-                chapters = chapters,
-                trickplay = trickplay,
-                onSeek = { seconds ->
-                    player.seekTo(((seconds - positionOffsetSeconds) * 1000).toLong())
-                    showChapters = false
-                },
-                onClose = { showChapters = false },
-                modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
 

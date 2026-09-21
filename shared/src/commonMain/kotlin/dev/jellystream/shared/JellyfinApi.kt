@@ -656,8 +656,8 @@ class JellyfinApi(
     fun personImageUrl(person: PersonCredit, maxWidth: Int): String? {
         val s = session ?: return null
         val id = person.id ?: return null
-        val tag = person.primaryImageTag ?: return null
-        return "${s.baseUrl}/Items/$id/Images/Primary?maxWidth=$maxWidth&tag=$tag"
+        val tag = person.primaryImageTag?.let { "&tag=$it" } ?: ""
+        return "${s.baseUrl}/Items/$id/Images/Primary?maxWidth=$maxWidth$tag"
     }
 
     fun chapterImageUrl(itemId: String, index: Int, tag: String?, maxWidth: Int): String? {

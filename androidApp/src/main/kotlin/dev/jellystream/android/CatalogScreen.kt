@@ -7,9 +7,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -29,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
@@ -54,6 +57,8 @@ fun CatalogScreen(
 ) {
     var items by remember { mutableStateOf<List<BaseItem>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    val isTv = LocalContext.current.packageManager
+        .hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK)
 
     LaunchedEffect(item.id) {
         try {
@@ -87,7 +92,7 @@ fun CatalogScreen(
                     modifier = Modifier.padding(24.dp),
                 )
                 else -> LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 120.dp),
+                    columns = GridCells.Adaptive(minSize = if (isTv) 180.dp else 140.dp),
                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -107,9 +112,9 @@ fun CatalogScreen(
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .aspectRatio(2f / 3f)
                                     .clip(RoundedCornerShape(10.dp))
-                                    .background(CinemaColors.SurfaceVariant)
-                                    .size(width = 120.dp, height = 180.dp),
+                                    .background(CinemaColors.SurfaceVariant),
                             )
                             Text(
                                 child.name ?: "",
@@ -143,6 +148,7 @@ fun PersonRow(
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Cast", style = MaterialTheme.typography.titleMedium)
         LazyRow(
+            contentPadding = PaddingValues(end = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             items(shown.size) { index ->
@@ -150,6 +156,7 @@ fun PersonRow(
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
+                        .width(96.dp)
                         .dpadFocusEffect(RoundedCornerShape(8.dp))
                         .clickable {
                             onOpen(
@@ -183,7 +190,7 @@ fun PersonRow(
                             it,
                             style = MaterialTheme.typography.labelSmall,
                             color = CinemaColors.TextSecondary,
-                            maxLines = 1,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                         )
                     }

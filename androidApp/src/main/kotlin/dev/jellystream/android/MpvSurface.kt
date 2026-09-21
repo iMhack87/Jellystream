@@ -3,6 +3,7 @@ package dev.jellystream.android
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -52,11 +53,18 @@ fun MpvPlaybackLayer(
     onError: () -> Unit,
 ) {
     val settings = LocalAppSettings.current
+    val context = LocalContext.current
     var positionMs by remember { mutableStateOf(0L) }
     var ended by remember { mutableStateOf(false) }
     var offerDismissed by remember { mutableStateOf(false) }
     var showStats by remember { mutableStateOf(false) }
+    var chromeVisible by remember { mutableStateOf(true) }
     var holder by remember { mutableStateOf<MpvHolder?>(null) }
+    val isTv = remember {
+        context.packageManager.hasSystemFeature(
+            android.content.pm.PackageManager.FEATURE_LEANBACK,
+        )
+    }
 
     fun mediaPositionTicks(): Long =
         JellyfinApi.millisecondsToTicks(
@@ -98,7 +106,19 @@ fun MpvPlaybackLayer(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+    LaunchedEffect(chromeVisible, showStats) {
+        if (chromeVisible && !showStats && !isTv) {
+            delay(4_000)
+            chromeVisible = false
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .clickable { chromeVisible = true },
+    ) {
         MpvSurface(
             api = api,
             plan = plan,
@@ -108,11 +128,14 @@ fun MpvPlaybackLayer(
             onError = onError,
             onReady = { holder = it },
         )
-        PlayerToolRow(
-            onToggleStats = { showStats = !showStats },
-            onChapters = null,
-            modifier = Modifier.align(Alignment.TopEnd).padding(12.dp),
-        )
+        if (chromeVisible || isTv) {
+            PlayerToolRow(
+                onToggleStats = { showStats = !showStats },
+                onChapters = null,
+                showCast = !isTv,
+                modifier = Modifier.align(Alignment.TopEnd).padding(12.dp),
+            )
+        }
         if (showStats) {
             StatsOverlay(
                 stats = plan.stats,
