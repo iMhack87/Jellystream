@@ -22,7 +22,7 @@ xcodebuild -project Jellystream.xcodeproj -scheme Jellystream -destination 'gene
 xcodebuild -project Jellystream.xcodeproj -scheme JellystreamTV -destination 'generic/platform=tvOS Simulator' build CODE_SIGNING_ALLOWED=NO # tvOS
 ```
 
-Signature Apple : équipe **B35G5Y85U9** (ZEF Computers, `contact@zefcomputers.com`). TestFlight : créer les apps `dev.jellystream.app` et `dev.jellystream.tv` dans App Store Connect, puis archiver iOS / tvOS (destination *generic iOS/tvOS device*, pas simulateur).
+Signature Apple : équipe **B35G5Y85U9** (ZEF Computers, `contact@zefcomputers.com`). Une seule fiche App Store Connect, bundle `dev.jellystream.app`, plateformes iOS **et** tvOS. Archiver chaque cible (destination *generic iOS/tvOS device*, pas simulateur).
 
 ## Pièges connus
 
@@ -62,7 +62,7 @@ Signature Apple : équipe **B35G5Y85U9** (ZEF Computers, `contact@zefcomputers.c
 
 - **Keychain + builds non signés** : `SecItemAdd` échoue (errSecMissingEntitlement) sur les builds simulateur `CODE_SIGNING_ALLOWED=NO` → `SessionStore` retombe sur UserDefaults dans ce cas. Sur appareil signé, c'est bien le Keychain qui est utilisé. Corollaire utile en E2E : on peut pré-injecter une session pour sauter l'écran de login. La clé courante est **`dev.jellystream.profiles`** (`PersistedProfiles`, avec le lien Jellyseerr dedans) ; `dev.jellystream.session` est l'ancienne clé mono-session, encore lue mais seulement par la migration.
   ```bash
-  xcrun simctl spawn <udid> defaults write dev.jellystream.tv dev.jellystream.profiles -string '{"profiles":[{"deviceId":"bench","session":{"baseUrl":"http://localhost:8097","userId":"11111111111111111111111111111111","accessToken":"bench-token","userName":"bench","serverName":"Subtitle Bench"},"jellyseerr":{"baseUrl":"http://localhost:5055","sessionCookie":"connect.sid=bench-session"}}]}'
+  xcrun simctl spawn <udid> defaults write dev.jellystream.app dev.jellystream.profiles -string '{"profiles":[{"deviceId":"bench","session":{"baseUrl":"http://localhost:8097","userId":"11111111111111111111111111111111","accessToken":"bench-token","userName":"bench","serverName":"Subtitle Bench"},"jellyseerr":{"baseUrl":"http://localhost:5055","sessionCookie":"connect.sid=bench-session"}}]}'
   ```
 - **Piloter un réglage sans le toucher à l'écran.** Les `Toggle` d'un `Form` présenté en `.sheet` n'ont pas répondu aux taps injectés (vérifié : même `Always Transcode`, antérieur à toute modification, ne bascule pas) — ce n'est pas l'app. Pour tester une branche qui dépend d'un réglage, écrire le blob `PersistedSettings` sous la clé `dev.jellystream.settings`, **dans le plist du conteneur**, puis `simctl shutdown` + `boot` : `{"byProfile":{"<baseUrl>|<userId>":{"autoPlayNextEpisode":false}}}`. Un champ suffit, les autres reprennent leur défaut.
 - **La pré-injection `simctl spawn … defaults write` ne peut pas écraser une clé que l'app a déjà écrite elle-même.** Les écritures de l'app vont dans le plist de son conteneur (`simctl get_app_container <udid> <bundle> data` → `Library/Preferences/<bundle>.plist`), qui l'emporte ; `simctl spawn defaults` écrit ailleurs et ne sert donc qu'aux clés vierges (une session sur une install neuve). Pour rejouer un état déjà écrit (watchlist, arrivées annoncées) : éditer le plist du conteneur (python `plistlib`), puis **`simctl shutdown` + `boot`** — sans le redémarrage, cfprefsd ressert sa copie en cache et l'app lit l'ancienne valeur. Symptôme trompeur : `defaults read` montre la nouvelle valeur, l'écran montre l'ancienne.
@@ -83,6 +83,6 @@ Compte `contact@zefcomputers.com`, équipe **B35G5Y85U9** (ZEF Computers). Posé
 
 Play : paquet `dev.jellystream.android`, piste interne 1.0.0 (versionCode 1) envoyée. Keystore d'upload **hors git** : `androidApp/jellystream-upload.jks` + `androidApp/keystore.properties` — à sauvegarder, sans ça on ne pourra plus signer. L'API Play se pilote avec ADC (`gcloud auth application-default login` + scope `androidpublisher`) et le projet quota `project-bd51f2ff-7209-4eea-969`.
 
-Apple TestFlight : les fiches App Store Connect `dev.jellystream.app` / `dev.jellystream.tv` doivent exister avant l'upload.
+Apple TestFlight : une fiche App Store Connect, bundle `dev.jellystream.app`, cases iOS + tvOS cochées. L’upload part de deux archives (scheme Jellystream et JellystreamTV) vers cette même fiche.
 
 Merge sur `main` uniquement via PR approuvée par Matthieu.
