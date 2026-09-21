@@ -17,7 +17,7 @@ struct ProfilePickerView: View {
 
     var body: some View {
         VStack(spacing: spacing) {
-            Text("Who's watching?")
+            Text(Copy.shared.whoIsWatching)
                 .font(.largeTitle.bold())
                 .foregroundStyle(.white)
 
@@ -47,7 +47,7 @@ struct ProfilePickerView: View {
                                 .foregroundStyle(.white.opacity(0.7))
                         }
                         .frame(width: avatarSize, height: avatarSize)
-                        Text("Add Profile")
+                        Text(Copy.shared.addProfile)
                             .font(.headline)
                             .foregroundStyle(.secondary)
                     }

@@ -77,7 +77,7 @@ struct SettingsView: View {
     private static let scales: [Double] = [0.75, 1.0, 1.25, 1.5, 2.0]
 
     private static func scaleLabel(_ scale: Double) -> String {
-        abs(scale - 1.0) < 0.01 ? "Normal" : "\(Int(scale * 100))%"
+        abs(scale - 1.0) < 0.01 ? Copy.shared.normal : "\(Int(scale * 100))%"
     }
 
     /// The system language, named as the picker would name it.
@@ -143,18 +143,18 @@ struct SettingsView: View {
 
                 // "Who's watching?" is also the only path from a
                 // single-profile install to adding a second account
-                Button("Switch Profile", action: onSwitchProfile)
-                Button("Log Out", role: .destructive, action: onLogout)
+                Button(Copy.shared.switchProfile, action: onSwitchProfile)
+                Button(Copy.shared.logOut, role: .destructive, action: onLogout)
             } header: {
-                Text("Account")
+                Text(Copy.shared.account)
             }
 
             #if !os(tvOS)
             // Offline is a phone and tablet feature: a television sits on
             // the same network as the server and has nowhere to put 40 GB
             if let downloader, let profile {
-                Section("Offline") {
-                    NavigationLink("Downloads") {
+                Section(Copy.shared.offline) {
+                    NavigationLink(Copy.shared.downloads) {
                         DownloadsView(
                             downloader: downloader,
                             profileKey: profile.profileKey,
@@ -171,10 +171,10 @@ struct SettingsView: View {
                     editingServer = true
                 } label: {
                     LabeledContent(
-                        "Jellyseerr server",
+                        Copy.shared.jellyseerrServer,
                         value: profile?.jellyseerr?.baseUrl
                             .replacingOccurrences(of: "https://", with: "")
-                            .replacingOccurrences(of: "http://", with: "") ?? "Not set"
+                            .replacingOccurrences(of: "http://", with: "") ?? Copy.shared.notSet
                     )
                 }
                 if let link = profile?.jellyseerr {
@@ -183,20 +183,16 @@ struct SettingsView: View {
                         signInFailed = false
                         signingIn = true
                     } label: {
-                        LabeledContent("Account", value: link.isSignedIn ? "Signed in" : "Sign in")
+                        LabeledContent(Copy.shared.account, value: link.isSignedIn ? Copy.shared.signedIn : Copy.shared.signIn)
                     }
-                    NavigationLink("Browse and request") {
+                    NavigationLink(Copy.shared.browseAndRequest) {
                         RequestsView(seerr: seerr)
                     }
                 }
             } header: {
-                Text("Requests")
+                Text(Copy.shared.requests)
             } footer: {
-                Text(
-                    "Requests are made with this profile's own Jellyfin account, so "
-                    + "quotas and history stay yours. Only the session is kept — never "
-                    + "the password."
-                )
+                Text(Copy.shared.requestsFooter)
             }
 
             if !libraries.isEmpty {
@@ -206,89 +202,79 @@ struct SettingsView: View {
                     // switched off — hidden is a choice here, never a
                     // library the user can no longer find.
                     ForEach(libraries, id: \.id) { view in
-                        Toggle(view.name ?? "Library", isOn: showsLibrary(view))
+                        Toggle(view.name ?? Copy.shared.library, isOn: showsLibrary(view))
                     }
                 } header: {
-                    Text("Home Screen")
+                    Text(Copy.shared.homeScreen)
                 }
             }
 
             Section {
-                Picker("When to show", selection: subtitleMode) {
+                Picker(Copy.shared.whenToShow, selection: subtitleMode) {
                     ForEach(SubtitleMode.entries, id: \.self) { mode in
                         Text(mode.label).tag(mode)
                     }
                 }
-                Picker("Language", selection: subtitleLanguage) {
+                Picker(Copy.shared.language, selection: subtitleLanguage) {
                     ForEach(SubtitleLanguages.shared.CHOICES, id: \.label) { choice in
                         Text(choice.label).tag(choice.code)
                     }
                 }
-                Picker("Size", selection: subtitleScale) {
+                Picker(Copy.shared.size, selection: subtitleScale) {
                     ForEach(Self.scales, id: \.self) { scale in
                         Text(Self.scaleLabel(scale)).tag(scale)
                     }
                 }
             } header: {
-                Text("Subtitles")
+                Text(Copy.shared.subtitles)
             } footer: {
-                Text(
-                    "Smart turns on full subtitles when the audio is not in your "
-                    + "language, and only forced ones when it is. Device language "
-                    + "follows the system: \(Self.deviceLanguageLabel)."
-                )
+                Text(Copy.shared.subtitleHelpNamed(device: Self.deviceLanguageLabel))
             }
 
             Section {
-                Toggle("Play Next Episode Automatically", isOn: autoPlayNextEpisode)
-                Toggle("Always Transcode", isOn: alwaysTranscode)
+                Toggle(Copy.shared.playNextAuto, isOn: autoPlayNextEpisode)
+                Toggle(Copy.shared.alwaysTranscode, isOn: alwaysTranscode)
             } header: {
-                Text("Playback")
+                Text(Copy.shared.playback)
             } footer: {
-                Text(
-                    "When an episode ends, the next one starts after a ten-second "
-                    + "countdown you can stop. Off keeps the same card and the same "
-                    + "button — it just waits for you.\n\n"
-                    + "Direct Play sends the original file untouched — leave this off. "
-                    + "Turn it on only if a title stutters or won't decode: the server "
-                    + "will re-encode it, at the cost of CPU and quality."
-                )
+                Text(Copy.shared.playNextHelp + "\n\n" + Copy.shared.transcodeHelp)
             }
 
             Section {
                 LabeledContent("Jellystream", value: JellyfinApi.companion.CLIENT_VERSION)
-                LabeledContent("Server", value: session.serverLabel)
+                LabeledContent(Copy.shared.server, value: session.serverLabel)
                 if let serverVersion {
                     LabeledContent("Jellyfin", value: serverVersion)
                 }
             } header: {
-                Text("About")
+                Text(Copy.shared.about)
             }
         }
-        .navigationTitle("Settings")
-        .alert("Jellyseerr server", isPresented: $editingServer) {
+        .navigationTitle(Copy.shared.settings)
+        .cinemaChrome()
+        .alert(Copy.shared.jellyseerrServer, isPresented: $editingServer) {
             TextField("seerr.example.com", text: $serverDraft)
-            Button("Save") {
+            Button(Copy.shared.save) {
                 if let profile { onProfileChange(profile.withJellyseerrServer(url: serverDraft)) }
             }
             // Clearing the field is how a profile stops using Jellyseerr
             if profile?.jellyseerr != nil {
-                Button("Remove", role: .destructive) {
+                Button(Copy.shared.remove, role: .destructive) {
                     if let profile { onProfileChange(profile.withJellyseerrServer(url: nil)) }
                 }
             }
-            Button("Cancel", role: .cancel) { }
+            Button(Copy.shared.cancel, role: .cancel) { }
         }
-        .alert("Sign in to Jellyseerr", isPresented: $signingIn) {
+        .alert(Copy.shared.signInToJellyseerr, isPresented: $signingIn) {
             // Only the password is asked for: the username is the profile's
             // own, and the password goes to the network and nowhere else
-            SecureField("Jellyfin password", text: $password)
-            Button("Sign in") { Task { await signIn() } }
-            Button("Cancel", role: .cancel) { }
+            SecureField(Copy.shared.jellyfinPassword, text: $password)
+            Button(Copy.shared.signIn) { Task { await signIn() } }
+            Button(Copy.shared.cancel, role: .cancel) { }
         } message: {
             Text(
                 signInFailed
-                    ? "Jellyseerr refused those credentials."
+                    ? Copy.shared.seerrRefused
                     : "\(session.displayName) on \(profile?.jellyseerr?.baseUrl ?? "")"
             )
         }

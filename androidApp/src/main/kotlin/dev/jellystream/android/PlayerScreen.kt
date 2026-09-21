@@ -23,7 +23,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -68,6 +67,7 @@ import dev.jellystream.shared.CueTiming
 import dev.jellystream.shared.SubtitleCue
 import dev.jellystream.shared.DownloadedItem
 import dev.jellystream.shared.BaseItem
+import dev.jellystream.shared.Copy
 import dev.jellystream.shared.JellyfinApi
 import dev.jellystream.shared.JellyseerrApi
 import dev.jellystream.shared.MediaSegment
@@ -78,7 +78,10 @@ import dev.jellystream.shared.NextSeasonAdvisor
 import dev.jellystream.shared.NextSeasonOffer
 import dev.jellystream.shared.PlaybackPlan
 import dev.jellystream.shared.RequestOutcome
+import dev.jellystream.shared.ChapterInfo
 import dev.jellystream.shared.SkipSegments
+import dev.jellystream.shared.Trickplay
+import dev.jellystream.shared.TrickplayInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -91,7 +94,7 @@ import kotlinx.coroutines.launch
  * onDispose, at which point the screen's own coroutine scope is already
  * being cancelled — a screen-tied scope would drop the request.
  */
-private val playbackReportScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+internal val playbackReportScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
 /**
  * Plays a downloaded file with no server in the loop.
@@ -168,7 +171,7 @@ fun OfflinePlayerScreen(
         FloatingNavButton(
             onClick = onClose,
             icon = Icons.Default.Close,
-            contentDescription = "Close player",
+            contentDescription = Copy.closePlayer,
             modifier = Modifier.align(Alignment.TopStart),
         )
     }
@@ -189,6 +192,7 @@ fun PlayerScreen(
     val alwaysTranscode = LocalAppSettings.current.alwaysTranscode
     var forceTranscode by remember { mutableStateOf(alwaysTranscode) }
     var failed by remember { mutableStateOf(false) }
+    var useMpv by remember(item.id) { mutableStateOf(false) }
     var segments by remember { mutableStateOf<List<MediaSegment>>(emptyList()) }
     var nextSeason by remember { mutableStateOf<NextSeasonOffer?>(null) }
     var nextEpisode by remember { mutableStateOf<NextEpisodeOffer?>(null) }
@@ -233,6 +237,22 @@ fun PlayerScreen(
 
     BackHandler(onBack = onClose)
 
+    val context = LocalContext.current
+    val isTv = remember {
+        context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+    }
+    var chromeVisible by remember { mutableStateOf(false) }
+    var showStats by remember { mutableStateOf(false) }
+    var showChapters by remember { mutableStateOf(false) }
+    var chapters by remember { mutableStateOf<List<ChapterInfo>>(emptyList()) }
+    var trickplay by remember { mutableStateOf<TrickplayInfo?>(null) }
+    var seekMedia by remember { mutableStateOf<(Double) -> Unit>({}) }
+    LaunchedEffect(item.id) {
+        val full = runCatching { api.getItem(item.id) }.getOrNull()
+        chapters = full?.chapters.orEmpty()
+        trickplay = Trickplay.pick(full?.trickplay, plan?.mediaSourceId)
+    }
+
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         val currentPlan = plan
         if (failed) {
@@ -243,15 +263,15 @@ fun PlayerScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text("This item could not be played", color = Color.White)
-                Button(onClick = onClose) { Text("Close") }
+                Text(Copy.couldNotPlay, color = Color.White)
+                Button(onClick = onClose) { Text(Copy.close) }
             }
         } else if (currentPlan == null) {
-            CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+            CinemaSpinner(modifier = Modifier.align(Alignment.Center))
         } else {
             // key() tears the player down and rebuilds it when the plan
             // changes (Direct Play -> transcode fallback)
-            key(currentPlan.url) {
+            key(currentPlan.url, useMpv) {
                 PlayerSurface(
                     api = api,
                     seerr = seerr,
@@ -260,11 +280,17 @@ fun PlayerScreen(
                     segments = segments,
                     offer = nextSeason,
                     nextEpisode = nextEpisode,
+                    useMpv = useMpv,
                     onPlayNext = onPlayNext,
+                    onChromeVisible = { chromeVisible = it },
+                    onSeekReady = { seekMedia = it },
                     onDirectPlayFailed = {
-                        if (!currentPlan.isTranscode && !forceTranscode) {
+                        if (!useMpv && !currentPlan.isTranscode) {
+                            useMpv = true
+                        } else if (!currentPlan.isTranscode && !forceTranscode) {
                             forceTranscode = true
                             plan = null
+                            useMpv = false
                         } else {
                             failed = true
                         }
@@ -277,9 +303,44 @@ fun PlayerScreen(
         FloatingNavButton(
             onClick = onClose,
             icon = Icons.Default.Close,
-            contentDescription = "Close player",
+            contentDescription = Copy.closePlayer,
             modifier = Modifier.align(Alignment.TopStart),
         )
+        // Same Box as the close button: PlayerView swallows taps inside
+        // PlayerSurface, so Info/Chapters have to sit here, as siblings.
+        if (chromeVisible && currentPlan != null) {
+            PlayerToolRow(
+                onToggleStats = { showStats = !showStats },
+                onChapters = if (chapters.isNotEmpty()) {{ showChapters = true }} else null,
+                showCast = !isTv,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 16.dp, end = 12.dp),
+            )
+        }
+        if (showStats && currentPlan != null) {
+            StatsOverlay(
+                stats = currentPlan.stats,
+                usingMpv = useMpv,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(start = 72.dp, top = 16.dp),
+            )
+        }
+        if (showChapters && chapters.isNotEmpty()) {
+            ChapterStrip(
+                api = api,
+                itemId = item.id,
+                chapters = chapters,
+                trickplay = trickplay,
+                onSeek = { seconds ->
+                    seekMedia(seconds)
+                    showChapters = false
+                },
+                onClose = { showChapters = false },
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        }
     }
 }
 
@@ -293,10 +354,27 @@ private fun PlayerSurface(
     segments: List<MediaSegment>,
     offer: NextSeasonOffer?,
     nextEpisode: NextEpisodeOffer?,
+    useMpv: Boolean,
     onPlayNext: (BaseItem) -> Unit,
+    onChromeVisible: (Boolean) -> Unit,
+    onSeekReady: ((Double) -> Unit) -> Unit,
     onDirectPlayFailed: () -> Unit,
 ) {
     val context = LocalContext.current
+    if (useMpv) {
+        MpvPlaybackLayer(
+            api = api,
+            seerr = seerr,
+            item = item,
+            plan = plan,
+            segments = segments,
+            offer = offer,
+            nextEpisode = nextEpisode,
+            onPlayNext = onPlayNext,
+            onError = onDirectPlayFailed,
+        )
+        return
+    }
     val settings = LocalAppSettings.current
     val subtitleScale = settings.subtitleScale
 
@@ -314,6 +392,12 @@ private fun PlayerSurface(
     // will play; null means "start with subtitles off"
     val desiredSubtitle = remember(plan, settings) {
         settings.chooseSubtitle(plan.subtitleStreams, plan.audioLanguage)
+    }
+
+    val activity = context as? android.app.Activity
+    DisposableEffect(plan.stats.frameRate) {
+        applyDisplayRefresh(activity, plan.stats.frameRate)
+        onDispose { clearDisplayRefresh(activity) }
     }
 
     val player = remember {
@@ -336,7 +420,7 @@ private fun PlayerSurface(
                     MediaItem.SubtitleConfiguration.Builder(android.net.Uri.parse(sub.url))
                         .setMimeType(mime)
                         .setLanguage(sub.language)
-                        .setLabel(sub.title ?: sub.language ?: "External")
+                        .setLabel(sub.title ?: sub.language ?: Copy.external)
                         .build()
                 }
                 val mediaItem = MediaItem.Builder()
@@ -379,6 +463,14 @@ private fun PlayerSurface(
                     }
                 })
             }
+    }
+
+    DisposableEffect(item.id) {
+        val stop = listenForCastStart(context) {
+            player.pause()
+            loadOnCast(context, api, item, player.currentPosition)
+        }
+        onDispose { stop() }
     }
 
     // Resync state. Session-only: a drift belongs to one badly muxed file,
@@ -425,7 +517,7 @@ private fun PlayerSurface(
 
     // Report start once, then position every 5 s while the screen is up
     LaunchedEffect(item.id) {
-        runCatching { api.reportPlaybackStart(item.id, plan.playSessionId) }
+        runCatching { api.reportPlaybackStart(item.id, plan.playSessionId, plan.playMethod) }
         while (true) {
             delay(5_000)
             runCatching {
@@ -434,6 +526,7 @@ private fun PlayerSurface(
                     mediaPositionTicks(),
                     isPaused = !player.isPlaying,
                     playSessionId = plan.playSessionId,
+                    playMethod = plan.playMethod,
                 )
             }
         }
@@ -446,7 +539,9 @@ private fun PlayerSurface(
             player.release()
             playbackReportScope.launch {
                 // PlaySessionId lets the server kill any transcode job
-                runCatching { api.reportPlaybackStopped(item.id, positionTicks, playSessionId) }
+                runCatching {
+                    api.reportPlaybackStopped(item.id, positionTicks, playSessionId, plan.playMethod)
+                }
             }
         }
     }
@@ -463,6 +558,7 @@ private fun PlayerSurface(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
+        var playerView by remember { mutableStateOf<PlayerView?>(null) }
         AndroidView(
             modifier = Modifier.fillMaxSize().background(Color.Black),
             factory = { ctx ->
@@ -477,9 +573,22 @@ private fun PlayerSurface(
                     subtitleView?.setFractionalTextSize(
                         SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * subtitleScale.toFloat()
                     )
+                    playerView = this
                 }
             },
         )
+        LaunchedEffect(playerView) {
+            val view = playerView ?: return@LaunchedEffect
+            while (true) {
+                onChromeVisible(view.isControllerFullyVisible)
+                delay(200)
+            }
+        }
+        LaunchedEffect(player) {
+            onSeekReady { seconds ->
+                player.seekTo(((seconds - positionOffsetSeconds) * 1000).toLong())
+            }
+        }
 
         // Our own cue layer, above the video and below the controls. Only
         // ever drawn while a shift is in effect.
@@ -525,7 +634,7 @@ private fun PlayerSurface(
                 .padding(horizontal = 28.dp, vertical = 56.dp),
         ) {
             SkipSegmentButton(
-                label = if (shownSegment?.isOutro == true) "Skip Credits" else "Skip Intro",
+                label = if (shownSegment?.isOutro == true) Copy.skipCredits else Copy.skipIntro,
                 onClick = {
                     val segment = activeSegment ?: return@SkipSegmentButton
                     activeSegment = null
@@ -566,7 +675,7 @@ private fun PlayerSurface(
  * "Not now" wants the credits, not the home screen.
  */
 @Composable
-private fun EndOfEpisodeCard(
+internal fun EndOfEpisodeCard(
     nextEpisode: NextEpisodeOffer?,
     offer: NextSeasonOffer?,
     autoPlay: Boolean,
@@ -610,7 +719,7 @@ private fun EndOfEpisodeCard(
                     requested = true
                 }
                 is RequestOutcome.NotSignedIn ->
-                    message = "Sign in to Jellyseerr again in Settings"
+                    message = Copy.signInSeerrAgain
                 is RequestOutcome.Failed -> message = outcome.message
             }
         }
@@ -657,7 +766,7 @@ private fun EndOfEpisodeCard(
                     offer?.let { season ->
                         Text(
                             if (requested) {
-                                "Season ${season.seasonNumber} requested — it'll appear once it downloads."
+                                Copy.seasonRequestedLanding(season.seasonNumber)
                             } else {
                                 season.title
                             },
@@ -667,14 +776,14 @@ private fun EndOfEpisodeCard(
                     }
                     if (countingDown) {
                         Text(
-                            "Playing in ${secondsLeft}s",
+                            Copy.playingIn(secondsLeft),
                             style = MaterialTheme.typography.bodyMedium,
                             color = CinemaColors.TextSecondary,
                         )
                     }
                 }
                 requested -> Text(
-                    "Requested — it'll appear once it downloads.",
+                    Copy.requestedLanding,
                     style = MaterialTheme.typography.titleMedium,
                     color = CinemaColors.TextPrimary,
                 )
@@ -709,7 +818,7 @@ private fun EndOfEpisodeCard(
                 when {
                     nextEpisode != null -> {
                         PlayerCardButton(
-                            label = "Play now",
+                            label = Copy.playNow,
                             isPrimary = true,
                             grabsFocus = true,
                             onClick = { onPlayNext(nextEpisode.episode) },
@@ -724,9 +833,9 @@ private fun EndOfEpisodeCard(
                         if (offer != null && !offer.alreadyRequested) {
                             PlayerCardButton(
                                 label = if (requested) {
-                                    "Requested"
+                                    Copy.requestedShort
                                 } else {
-                                    "Request season ${offer.seasonNumber}"
+                                    Copy.requestSeason(offer.seasonNumber)
                                 },
                                 isPrimary = false,
                                 grabsFocus = false,
@@ -734,7 +843,7 @@ private fun EndOfEpisodeCard(
                             )
                         }
                         PlayerCardButton(
-                            "Not now",
+                            Copy.notNow,
                             isPrimary = false,
                             grabsFocus = false,
                             onClick = onDismiss,
@@ -746,15 +855,15 @@ private fun EndOfEpisodeCard(
                     // dismiss something that was already leaving.
                     requested -> Unit
                     offer != null && offer.alreadyRequested ->
-                        PlayerCardButton("OK", isPrimary = true, grabsFocus = true, onClick = onDismiss)
+                        PlayerCardButton(Copy.ok, isPrimary = true, grabsFocus = true, onClick = onDismiss)
                     offer != null -> {
                         PlayerCardButton(
-                            label = "Request season ${offer.seasonNumber}",
+                            label = Copy.requestSeason(offer.seasonNumber),
                             isPrimary = true,
                             grabsFocus = true,
                             onClick = { requestSeason(offer) },
                         )
-                        PlayerCardButton("Not now", isPrimary = false, grabsFocus = false, onClick = onDismiss)
+                        PlayerCardButton(Copy.notNow, isPrimary = false, grabsFocus = false, onClick = onDismiss)
                     }
                 }
             }
@@ -816,7 +925,7 @@ private fun PlayerCardButton(
  * a single center press skips; inert focus-wise on touch devices.
  */
 @Composable
-private fun SkipSegmentButton(
+internal fun SkipSegmentButton(
     label: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -935,9 +1044,9 @@ private fun SubtitleSyncControl(
             // Says which way it moved: "-0.75s" alone tells nobody whether
             // that is earlier or later
             when {
-                delaySeconds == 0.0 -> "Subtitles in sync"
-                delaySeconds > 0 -> "Subtitles %.2fs later".format(delaySeconds)
-                else -> "Subtitles %.2fs earlier".format(-delaySeconds)
+                delaySeconds == 0.0 -> Copy.subtitlesInSync
+                delaySeconds > 0 -> Copy.subtitlesLater("%.2f".format(delaySeconds))
+                else -> Copy.subtitlesEarlier("%.2f".format(-delaySeconds))
             },
             color = Color.White,
             style = MaterialTheme.typography.labelLarge,
@@ -950,7 +1059,7 @@ private fun SubtitleSyncControl(
         SyncButton("+") { onNudge(SUBTITLE_DELAY_STEP) }
         // Also fixed: an appearing Reset would shove the row sideways
         Box(modifier = Modifier.widthIn(min = 84.dp), contentAlignment = Alignment.Center) {
-            if (delaySeconds != 0.0) SyncButton("Reset", onClick = onReset)
+            if (delaySeconds != 0.0) SyncButton(Copy.reset, onClick = onReset)
         }
     }
 }

@@ -45,9 +45,9 @@ data class SearchHit(
     /** "Film · 2024" / "Series · 2022 · on the server" */
     val subtitle: String
         get() = listOfNotNull(
-            if (isSeries) "Series" else "Film",
+            if (isSeries) Copy.series else Copy.film,
             year,
-            if (isOnServer) "on the server" else null,
+            if (isOnServer) Copy.onTheServerLower else null,
         ).joinToString(" · ")
 }
 

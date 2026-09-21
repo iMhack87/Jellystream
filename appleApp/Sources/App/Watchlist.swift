@@ -155,6 +155,6 @@ private struct WatchlistToggle: View {
         .buttonStyle(.plain)
         .foregroundStyle(.white)
         #endif
-        .accessibilityLabel(listed ? "Remove from watchlist" : "Add to watchlist")
+        .accessibilityLabel(listed ? Copy.shared.removeWatchlist : Copy.shared.addWatchlist)
     }
 }

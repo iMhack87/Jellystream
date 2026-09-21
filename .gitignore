@@ -30,6 +30,9 @@ build/
 local.properties
 *.apk
 *.aab
+*.jks
+*.keystore
+keystore.properties
 captures/
 
 # Node (tooling)

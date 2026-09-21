@@ -29,9 +29,9 @@ struct RequestsView: View {
             }
 
             if query.isEmpty {
-                Section("Your requests") {
+                Section(Copy.shared.yourRequests) {
                     if mine.isEmpty {
-                        Text("Nothing requested yet. Search above to ask for a film or a series.")
+                        Text(Copy.shared.nothingRequestedYet)
                             .foregroundStyle(.secondary)
                     }
                     ForEach(mine, id: \.request.id) { row in
@@ -39,11 +39,11 @@ struct RequestsView: View {
                     }
                 }
             } else if searching {
-                Section { ProgressView() }
+                Section { CinemaSpinner().frame(maxWidth: .infinity).padding(.vertical, 16) }
             } else if results.isEmpty {
-                Section { Text("Nothing found for \"\(query)\".").foregroundStyle(.secondary) }
+                Section { Text(Copy.shared.nothingFound(query: query)).foregroundStyle(.secondary) }
             } else {
-                Section("Results") {
+                Section(Copy.shared.results) {
                     ForEach(results, id: \.id) { result in
                         ResultRow(
                             seerr: seerr,
@@ -56,15 +56,16 @@ struct RequestsView: View {
                 }
             }
         }
-        .navigationTitle("Requests")
+        .navigationTitle(Copy.shared.requests)
+        .cinemaChrome()
         #if !os(tvOS)
-        .searchable(text: $query, prompt: "Search for something to request")
+        .searchable(text: $query, prompt: Copy.shared.searchToRequest)
         #endif
         #if os(tvOS)
         .safeAreaInset(edge: .top) {
             // tvOS has no .searchable on a plain List, so the field is part
             // of the screen rather than chrome
-            TextField("Search for something to request", text: $query)
+            TextField(Copy.shared.searchToRequest, text: $query)
                 .textFieldStyle(.plain)
                 .padding(.horizontal, 40)
                 .padding(.vertical, 12)
@@ -131,17 +132,17 @@ struct RequestsView: View {
             switch outcome {
             case is RequestOutcome.Sent:
                 justRequested[Int(result.id)] = .pending
-                notice = "Requested \(result.displayTitle)"
+                notice = Copy.shared.requested(title: result.displayTitle)
                 await refreshRequests()
             case is RequestOutcome.AlreadyRequested:
                 justRequested[Int(result.id)] = .pending
-                notice = "\(result.displayTitle) was already requested"
+                notice = Copy.shared.alreadyRequestedTitle(title: result.displayTitle)
             case is RequestOutcome.NotSignedIn:
-                notice = "Sign in to Jellyseerr again in Settings"
+                notice = Copy.shared.signInSeerrAgain
             case let failure as RequestOutcome.Failed:
                 notice = failure.message
             default:
-                notice = "Could not reach Jellyseerr"
+                notice = Copy.shared.couldNotReachSeerr
             }
         }
     }
@@ -198,7 +199,7 @@ private struct ResultRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(result.displayTitle).font(.headline)
                 Text(
-                    [result.year, result.isSeries ? "Series" : "Film"]
+                    [result.year, result.isSeries ? Copy.shared.series : Copy.shared.film]
                         .compactMap { $0 }
                         .joined(separator: " · ")
                 )

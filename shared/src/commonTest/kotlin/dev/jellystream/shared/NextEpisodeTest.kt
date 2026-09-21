@@ -145,7 +145,7 @@ class NextEpisodeTest {
             episode = episode("e2", season = 1, number = 2, name = "Half Loop"),
             startsNewSeason = false,
         )
-        assertEquals("Up next", offer.heading)
+        assertEquals(Copy.upNext, offer.heading)
         assertEquals("S1 · E2 · Half Loop", offer.label)
     }
 
@@ -155,14 +155,14 @@ class NextEpisodeTest {
             episode = episode("s2e1", season = 2, number = 1, name = "Good News About Hell"),
             startsNewSeason = true,
         )
-        assertEquals("Next season", offer.heading)
+        assertEquals(Copy.nextSeason, offer.heading)
         assertTrue(offer.label.startsWith("S2 · E1"))
     }
 
     @Test
     fun aNamelessEpisodeStillGetsSomethingToPutOnTheCard() {
         val offer = NextEpisodeOffer(episode = episode("x", season = null, number = null), startsNewSeason = false)
-        assertEquals("Next episode", offer.label)
+        assertEquals(Copy.nextEpisode, offer.label)
     }
 
     @Test

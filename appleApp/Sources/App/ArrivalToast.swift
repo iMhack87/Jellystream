@@ -1,6 +1,10 @@
 import Shared
 import SwiftUI
+#if os(macOS)
+import AppKit
+#else
 import UIKit
+#endif
 
 /**
  What the arrival poll last saw, for whoever else wants it.
@@ -46,7 +50,11 @@ final class ArrivalToastWindow {
     static let shared = ArrivalToastWindow()
 
     private let model = ToastModel()
+    #if os(macOS)
+    private var window: NSPanel?
+    #else
     private var window: UIWindow?
+    #endif
     private var pending: [(message: String, onShown: () -> Void)] = []
     private var runner: Task<Void, Never>?
 
@@ -56,6 +64,30 @@ final class ArrivalToastWindow {
     /// second window would double every notice.
     func install() {
         guard window == nil else { return }
+        #if os(macOS)
+        let host = NSHostingView(rootView: ArrivalToastOverlay(model: model))
+        host.wantsLayer = true
+        host.layer?.backgroundColor = NSColor.clear.cgColor
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 80),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.ignoresMouseEvents = true
+        panel.level = .statusBar
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.contentView = host
+        if let screen = NSScreen.main {
+            let frame = screen.visibleFrame
+            panel.setFrameOrigin(NSPoint(x: frame.maxX - 500, y: frame.maxY - 100))
+        }
+        panel.orderFrontRegardless()
+        window = panel
+        #else
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         // At first appear the scene is usually still foregroundInactive,
         // hence the fallback rather than a strict active match
@@ -76,6 +108,7 @@ final class ArrivalToastWindow {
         // with it the tvOS focus engine
         overlay.isHidden = false
         window = overlay
+        #endif
     }
 
     /// Queued rather than replaced: two titles landing in the same poll
@@ -118,9 +151,11 @@ private final class ToastModel: ObservableObject {
 /// Nothing in this window is a target — not the notice, not the empty
 /// space around it. `isUserInteractionEnabled` alone would be enough on
 /// iOS; this also keeps tvOS from ever considering the window for focus.
+#if !os(macOS)
 private final class PassthroughWindow: UIWindow {
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? { nil }
 }
+#endif
 
 /// A small notice in the top corner: away from the player's own controls,
 /// and out of the way of the tvOS tab bar's focus.

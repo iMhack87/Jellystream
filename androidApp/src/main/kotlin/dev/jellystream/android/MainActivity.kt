@@ -42,7 +42,6 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -63,6 +62,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
@@ -79,6 +79,7 @@ import dev.jellystream.shared.AnnouncedArrivals
 import dev.jellystream.shared.AppSettings
 import dev.jellystream.shared.Arrivals
 import dev.jellystream.shared.BaseItem
+import dev.jellystream.shared.Copy
 import dev.jellystream.shared.DownloadAvailability
 import dev.jellystream.shared.DownloadedItem
 import dev.jellystream.shared.JellyfinApi
@@ -134,6 +135,7 @@ private sealed interface Screen {
     data object Home : Screen
     data class Detail(val item: BaseItem) : Screen
     data class Series(val item: BaseItem) : Screen
+    data class Catalog(val item: BaseItem) : Screen
     data object Search : Screen
     data object Settings : Screen
     data object Requests : Screen
@@ -381,6 +383,7 @@ private fun SignedInApp(
     fun open(item: BaseItem) {
         when {
             item.isSeries -> backStack.add(Screen.Series(item))
+            item.isBoxSet || item.isPerson || item.isGenre -> backStack.add(Screen.Catalog(item))
             item.isPlayable -> backStack.add(Screen.Detail(item))
         }
     }
@@ -419,6 +422,7 @@ private fun SignedInApp(
                     api,
                     screen.item,
                     onPlay = { playing = it },
+                    onOpen = ::open,
                     onBack = ::goBack,
                     watchlist = watchlist,
                     onWatchlistChange = ::changeWatchlist,
@@ -429,6 +433,12 @@ private fun SignedInApp(
                             downloader.start(screen.item, api.containerOf(screen.item))
                         }
                     },
+                )
+                is Screen.Catalog -> CatalogScreen(
+                    api = api,
+                    item = screen.item,
+                    onOpen = ::open,
+                    onBack = ::goBack,
                 )
                 is Screen.Series -> SeriesScreen(
                     api,
@@ -532,7 +542,7 @@ private fun ProfilePickerScreen(
         verticalArrangement = Arrangement.spacedBy(36.dp, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("Who's watching?", style = MaterialTheme.typography.headlineLarge)
+        Text(Copy.whoIsWatching, style = MaterialTheme.typography.headlineLarge)
 
         Row(
             modifier = Modifier.horizontalScroll(rememberScrollState()),
@@ -549,7 +559,7 @@ private fun ProfilePickerScreen(
             }
             ProfileAvatar(
                 initial = null,
-                title = "Add Profile",
+                title = Copy.addProfile,
                 subtitle = null,
                 onClick = onAdd,
             )
@@ -701,21 +711,21 @@ private fun LoginScreen(
         OutlinedTextField(
             value = serverUrl,
             onValueChange = { serverUrl = it },
-            label = { Text("Server URL") },
+            label = { Text(Copy.serverUrl) },
             singleLine = true,
             modifier = fieldModifier,
         )
         OutlinedTextField(
             value = username,
             onValueChange = { username = it },
-            label = { Text("Username") },
+            label = { Text(Copy.username) },
             singleLine = true,
             modifier = fieldModifier,
         )
         OutlinedTextField(
             value = password,
             onValueChange = { password = it },
-            label = { Text("Password") },
+            label = { Text(Copy.password) },
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
             modifier = fieldModifier,
@@ -726,12 +736,12 @@ private fun LoginScreen(
             onClick = { connect(quickConnect = false) },
             modifier = Modifier.dpadFocusEffect(RoundedCornerShape(10.dp)),
         ) {
-            Text("Connect")
+            Text(Copy.connect)
         }
 
         // Quick Connect: no on-screen keyboard needed for username/password
         Text(
-            "Use Quick Connect",
+            Copy.quickConnect,
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier
                 .dpadFocusEffect(RoundedCornerShape(10.dp))
@@ -748,13 +758,13 @@ private fun LoginScreen(
                 style = MaterialTheme.typography.headlineLarge,
             )
             Text(
-                "Enter this code in Jellyfin on your phone or browser",
+                Copy.enterCode,
                 style = MaterialTheme.typography.bodyMedium,
                 color = CinemaColors.TextSecondary,
             )
         }
 
-        if (loading) CircularProgressIndicator()
+        if (loading) CinemaSpinner()
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
 
@@ -774,13 +784,9 @@ private fun LoginScreen(
     insecurePending?.let { (resolvedUrl, quickConnect) ->
         AlertDialog(
             onDismissRequest = { insecurePending = null },
-            title = { Text("Unencrypted connection") },
+            title = { Text(Copy.unencryptedTitle) },
             text = {
-                Text(
-                    "This server is only reachable over plain HTTP. Your " +
-                        "password and streams would travel unencrypted on " +
-                        "the network."
-                )
+                Text(Copy.unencryptedBody)
             },
             confirmButton = {
                 TextButton(
@@ -800,7 +806,7 @@ private fun LoginScreen(
                             } catch (e: CancellationException) {
                                 throw e
                             } catch (e: Exception) {
-                                error = e.message ?: "Connection failed"
+                                error = e.message ?: Copy.connectionFailed
                             } finally {
                                 loading = false
                             }
@@ -808,7 +814,7 @@ private fun LoginScreen(
                     },
                     modifier = Modifier.dpadFocusEffect(RoundedCornerShape(10.dp)),
                 ) {
-                    Text("Connect Anyway")
+                    Text(Copy.connectAnyway)
                 }
             },
             dismissButton = {
@@ -816,7 +822,7 @@ private fun LoginScreen(
                     onClick = { insecurePending = null },
                     modifier = Modifier.dpadFocusEffect(RoundedCornerShape(10.dp)),
                 ) {
-                    Text("Cancel")
+                    Text(Copy.cancel)
                 }
             },
         )
@@ -852,15 +858,21 @@ private fun HomeScreen(
             val result = mutableListOf<LibrarySection>()
             runCatching { api.getResumeItems(12) }.getOrDefault(emptyList())
                 .takeIf { it.isNotEmpty() }
-                ?.let { result.add(LibrarySection("Continue Watching", "resume", it)) }
+                ?.let { result.add(LibrarySection(Copy.continueWatching, "resume", it)) }
             runCatching { api.getNextUp(12) }.getOrDefault(emptyList())
                 .takeIf { it.isNotEmpty() }
-                ?.let { result.add(LibrarySection("Next Up", "nextup", it)) }
+                ?.let { result.add(LibrarySection(Copy.nextUp, "nextup", it)) }
+            runCatching { api.getCollections(24) }.getOrDefault(emptyList())
+                .takeIf { it.isNotEmpty() }
+                ?.let { result.add(LibrarySection(Copy.collections, "collections", it)) }
+            runCatching { api.getGenres("", 24) }.getOrDefault(emptyList())
+                .takeIf { it.isNotEmpty() }
+                ?.let { result.add(LibrarySection(Copy.genres, "genres", it)) }
             settings.visibleLibraries(api.getUserViews()).forEach { view ->
                 // One failing view must not blank the whole home screen
                 val latest = runCatching { api.getLatestItems(view.id, 12) }
                     .getOrDefault(emptyList())
-                result.add(LibrarySection(view.name ?: "Library", view.id, latest))
+                result.add(LibrarySection(view.name ?: Copy.library, view.id, latest))
             }
             sections = result
         } catch (e: Exception) {
@@ -949,12 +961,12 @@ private fun HomeScreen(
             // button that deletes the films they downloaded for it.
             if (downloadCount > 0) {
                 Text(
-                    "Can't reach the server.",
+                    Copy.cantReachServer,
                     color = CinemaColors.TextPrimary,
                     style = MaterialTheme.typography.titleMedium,
                 )
                 Text(
-                    "$downloadCount downloaded ${if (downloadCount == 1) "title is" else "titles are"} still on this device.",
+                    Copy.downloadsStillOnDevice(downloadCount),
                     color = CinemaColors.TextSecondary,
                     style = MaterialTheme.typography.bodyMedium,
                 )
@@ -964,9 +976,9 @@ private fun HomeScreen(
                         .tvDefaultFocus()
                         .dpadFocusEffect(RoundedCornerShape(10.dp)),
                 ) {
-                    Text("Go to downloads")
+                    Text(Copy.goToDownloads)
                 }
-                TextButton(onClick = onLogout) { Text("Log out") }
+                TextButton(onClick = onLogout) { Text(Copy.logOut) }
             } else {
                 Text(error!!, color = MaterialTheme.colorScheme.error)
                 // Never strand the user on a dead server: offer a way out
@@ -974,17 +986,11 @@ private fun HomeScreen(
                     onClick = onLogout,
                     modifier = Modifier.dpadFocusEffect(RoundedCornerShape(10.dp)),
                 ) {
-                    Text("Log out")
+                    Text(Copy.logOut)
                 }
             }
         }
-        sections == null -> Column(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            CircularProgressIndicator()
-        }
+        sections == null -> CinemaLoading()
         else -> {
             // Hero must be openable: first playable item or series across sections
             val hero = sections!!.asSequence()
@@ -1038,7 +1044,7 @@ private fun HomeScreen(
                         item(key = "favorites") {
                             LibraryRow(
                                 api,
-                                LibrarySection("Favourites", "favorites", favorites),
+                                LibrarySection(Copy.favourites, "favorites", favorites),
                                 onOpen,
                             )
                         }
@@ -1094,7 +1100,7 @@ private fun AccountBar(
             onClick = onSearch,
             modifier = Modifier.dpadFocusEffect(CircleShape),
         ) {
-            Icon(Icons.Default.Search, contentDescription = "Search", tint = Color.White)
+            Icon(Icons.Default.Search, contentDescription = Copy.search, tint = Color.White)
         }
         Box(
             modifier = Modifier
@@ -1161,7 +1167,7 @@ private fun HeroSection(
                 val meta = buildList {
                     item.episodeLabel?.let { add("${item.seriesName ?: ""} $it".trim()) }
                     item.productionYear?.let { add(it.toString()) }
-                    item.runtimeMinutes?.let { add("$it min") }
+                    item.runtimeMinutes?.let { add(Copy.minutes(it)) }
                 }.joinToString("  ·  ")
                 if (meta.isNotEmpty()) {
                     Text(
@@ -1188,11 +1194,11 @@ private fun HeroSection(
                         ) {
                             Icon(Icons.Default.PlayArrow, contentDescription = null)
                             Spacer(Modifier.width(6.dp))
-                            Text(if (item.resumePositionSeconds > 60) "Resume" else "Play")
+                            Text(if (item.resumePositionSeconds > 60) Copy.resume else Copy.play)
                         }
                     }
                     Text(
-                        "Details",
+                        Copy.details,
                         style = MaterialTheme.typography.titleMedium,
                         color = Color.White,
                         modifier = Modifier
@@ -1225,7 +1231,7 @@ private fun ContinueRow(api: JellyfinApi, section: LibrarySection, onOpen: (Base
                     modifier = Modifier
                         .width(248.dp)
                         .dpadFocusEffect()
-                        .clickable(enabled = item.isPlayable || item.isSeries) { onOpen(item) },
+                        .clickable(enabled = item.isBrowsable) { onOpen(item) },
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Box(
@@ -1294,7 +1300,7 @@ private fun ContinueRow(api: JellyfinApi, section: LibrarySection, onOpen: (Base
 private fun ArrivingRow(requests: List<RequestedTitle>) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(
-            "Requested & on the way",
+            Copy.requestedOnTheWay,
             style = MaterialTheme.typography.titleLarge,
             modifier = Modifier.padding(horizontal = 20.dp),
         )
@@ -1345,7 +1351,7 @@ private fun WatchlistRow(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(
-            "Watchlist",
+            Copy.watchlist,
             style = MaterialTheme.typography.titleLarge,
             modifier = Modifier.padding(horizontal = 20.dp),
         )
@@ -1393,8 +1399,8 @@ private fun WatchlistRow(
                         // only when that is actually the reason.
                         when {
                             item != null -> entry.year.orEmpty()
-                            entry.isOnServer -> "Loading…"
-                            else -> "Not on the server yet"
+                            entry.isOnServer -> Copy.loading
+                            else -> Copy.notOnServerYet
                         },
                         style = MaterialTheme.typography.labelSmall,
                         color = CinemaColors.TextSecondary,
@@ -1420,9 +1426,67 @@ private fun LibraryRow(api: JellyfinApi, section: LibrarySection, onOpen: (BaseI
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             items(section.items, key = { it.id }) { item ->
-                PosterCard(api, item, onOpen)
+                if (section.key == "genres") {
+                    GenreCard(api, item, onOpen)
+                } else {
+                    PosterCard(api, item, onOpen)
+                }
             }
         }
+    }
+}
+
+/**
+ * Landscape tile for a genre. Jellyfin's genre Primary is a collage of
+ * posters: a 2:3 crop slices through the mosaic. The name is the subject.
+ */
+@Composable
+private fun GenreCard(api: JellyfinApi, item: BaseItem, onOpen: (BaseItem) -> Unit) {
+    Box(
+        modifier = Modifier
+            .width(248.dp)
+            .height(140.dp)
+            .dpadFocusEffect(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(12.dp))
+            .background(CinemaColors.SurfaceVariant)
+            .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
+            .clickable(enabled = item.isBrowsable) { onOpen(item) },
+    ) {
+        AsyncImage(
+            model = api.imageUrl(item, 800),
+            contentDescription = item.name,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .fillMaxSize()
+                .blur(6.dp),
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.4f)),
+        )
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .height(80.dp)
+                .background(
+                    Brush.verticalGradient(
+                        0.0f to Color.Transparent,
+                        1.0f to Color.Black.copy(alpha = 0.8f),
+                    ),
+                ),
+        )
+        Text(
+            item.name.orEmpty().replaceFirstChar { it.titlecase() },
+            style = MaterialTheme.typography.titleMedium,
+            color = Color.White,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(12.dp),
+        )
     }
 }
 
@@ -1441,7 +1505,7 @@ private fun PosterCard(api: JellyfinApi, item: BaseItem, onOpen: (BaseItem) -> U
             .clip(RoundedCornerShape(10.dp))
             .background(CinemaColors.SurfaceVariant)
             .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
-            .clickable(enabled = item.isPlayable || item.isSeries) { onOpen(item) },
+            .clickable(enabled = item.isBrowsable) { onOpen(item) },
     ) {
         AsyncImage(
             model = api.imageUrl(item, 400),

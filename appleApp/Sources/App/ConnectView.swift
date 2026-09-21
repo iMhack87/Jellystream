@@ -107,14 +107,14 @@ final class AppModel: ObservableObject {
         }
         session = nil
         addingProfile = false
-        status = .failure("Session expired — please sign in again")
+        status = .failure(Copy.shared.sessionExpired)
     }
 
     private static func makeApi(deviceId: String) -> JellyfinApi {
         JellyfinApi(
             clientName: "Jellystream",
-            clientVersion: "0.1.0",
-            deviceName: UIDevice.current.name,
+            clientVersion: JellyfinApi.companion.CLIENT_VERSION,
+            deviceName: DeviceName.current,
             deviceId: deviceId
         )
     }
@@ -257,7 +257,7 @@ final class AppModel: ObservableObject {
                 guard let baseUrl = started.first as? String,
                       let initial = started.second as? QuickConnectState
                 else {
-                    status = .failure("Quick Connect is unavailable on this server")
+                    status = .failure(Copy.shared.quickConnectUnavailable)
                     return
                 }
                 quickConnectCode = initial.code
@@ -268,7 +268,7 @@ final class AppModel: ObservableObject {
                 while !authenticated {
                     if Date() > deadline {
                         quickConnectCode = nil
-                        status = .failure("Quick Connect code expired — try again")
+                        status = .failure(Copy.shared.quickConnectExpired)
                         return
                     }
                     try await Task.sleep(nanoseconds: 3_000_000_000)
@@ -405,6 +405,8 @@ struct RootView: View {
                 ProfilePickerView(model: model)
             }
         }
+        .cinemaChrome()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         // The notice has to show during playback, and the player is a
         // fullScreenCover — a UIKit modal above this whole hierarchy. Its
         // own window is the only placement that survives that.
@@ -492,85 +494,187 @@ struct ConnectView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Server") {
-                    TextField("Server URL", text: $serverUrl)
-                        .textContentType(.URL)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                    TextField("Username", text: $username)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                    SecureField("Password", text: $password)
-                }
-
-                Section {
-                    Button("Connect") {
-                        model.login(
-                            serverUrl: serverUrl,
-                            username: username,
-                            password: password
-                        )
-                    }
-                    .disabled(model.isLoading || serverUrl.isEmpty)
-
-                    // No on-screen keyboard needed — ideal on Apple TV
-                    Button("Use Quick Connect") {
-                        model.startQuickConnect(serverUrl: serverUrl)
-                    }
-                    .disabled(model.isLoading || serverUrl.isEmpty)
-
-                    // Adding from the picker must always offer a way back
-                    if model.addingProfile {
-                        Button("Back to profiles", role: .cancel) {
-                            model.cancelAddProfile()
-                        }
-                    }
-                }
-
-                if let code = model.quickConnectCode {
-                    Section("Quick Connect") {
-                        Text(code)
-                            .font(.system(.largeTitle, design: .rounded).bold())
-                        Text("Enter this code in Jellyfin on your phone or browser")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                switch model.status {
-                case .idle:
-                    EmptyView()
-                case .loading:
-                    ProgressView()
-                case .failure(let message):
-                    Text(message).foregroundStyle(.red)
-                }
-            }
-            .navigationTitle(model.addingProfile ? "Add Profile" : "Jellystream")
-            // Shown BEFORE any credential leaves the device: the server
-            // only answered over plain http for a scheme-less input
-            .alert(
-                "Unencrypted connection",
-                isPresented: Binding(
-                    get: { model.pendingInsecure != nil },
-                    set: { if !$0 { model.cancelInsecureConnection() } }
-                )
-            ) {
-                Button("Connect Anyway", role: .destructive) {
-                    model.confirmInsecureConnection()
-                }
-                Button("Cancel", role: .cancel) {
-                    model.cancelInsecureConnection()
-                }
-            } message: {
-                Text("This server is only reachable over plain HTTP. Your password and streams would travel unencrypted on the network.")
-            }
-            #if os(tvOS)
-            .onExitCommand {
-                if model.addingProfile { model.cancelAddProfile() }
-            }
+            #if os(macOS)
+            macConnect
+            #else
+            formConnect
             #endif
+        }
+        .cinemaChrome()
+        .alert(
+            Copy.shared.unencryptedTitle,
+            isPresented: Binding(
+                get: { model.pendingInsecure != nil },
+                set: { if !$0 { model.cancelInsecureConnection() } }
+            )
+        ) {
+            Button(Copy.shared.connectAnyway, role: .destructive) {
+                model.confirmInsecureConnection()
+            }
+            Button(Copy.shared.cancel, role: .cancel) {
+                model.cancelInsecureConnection()
+            }
+        } message: {
+            Text(Copy.shared.unencryptedBody)
+        }
+        #if os(tvOS)
+        .onExitCommand {
+            if model.addingProfile { model.cancelAddProfile() }
+        }
+        #endif
+    }
+
+    #if os(macOS)
+    private var macConnect: some View {
+        VStack(spacing: 28) {
+            Spacer(minLength: 24)
+            Text(model.addingProfile ? Copy.shared.addProfile : "Jellystream")
+                .font(.system(size: 34, weight: .bold))
+                .foregroundStyle(.white)
+
+            VStack(spacing: 12) {
+                macField(Copy.shared.serverUrl, text: $serverUrl, secure: false)
+                macField(Copy.shared.username, text: $username, secure: false)
+                macField(Copy.shared.password, text: $password, secure: true)
+            }
+            .frame(maxWidth: 420)
+
+            VStack(spacing: 10) {
+                Button {
+                    model.login(serverUrl: serverUrl, username: username, password: password)
+                } label: {
+                    Text(Copy.shared.connect)
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.black)
+                .background(Cinema.accent, in: Capsule())
+                .disabled(model.isLoading || serverUrl.isEmpty)
+                .opacity(serverUrl.isEmpty ? 0.4 : 1)
+
+                Button(Copy.shared.quickConnect) {
+                    model.startQuickConnect(serverUrl: serverUrl)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white.opacity(0.85))
+                .disabled(model.isLoading || serverUrl.isEmpty)
+
+                if model.addingProfile {
+                    Button(Copy.shared.backToProfiles) { model.cancelAddProfile() }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: 420)
+
+            if let code = model.quickConnectCode {
+                VStack(spacing: 8) {
+                    Text(code)
+                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                    Text(Copy.shared.enterCode)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            statusView
+            Spacer(minLength: 24)
+        }
+        .padding(40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Cinema.background)
+    }
+
+    private func macField(_ title: String, text: Binding<String>, secure: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Group {
+                if secure {
+                    SecureField("", text: text)
+                } else {
+                    TextField("", text: text)
+                        .neverAutocapitalize()
+                        .autocorrectionDisabled()
+                }
+            }
+            .textFieldStyle(.plain)
+            .foregroundStyle(.white)
+            .padding(12)
+            .background(Cinema.field, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Cinema.stroke, lineWidth: 1)
+            )
+        }
+    }
+    #endif
+
+    private var formConnect: some View {
+        Form {
+            Section(Copy.shared.server) {
+                TextField(Copy.shared.serverUrl, text: $serverUrl)
+                    .textContentType(.URL)
+                    .autocorrectionDisabled()
+                    .neverAutocapitalize()
+                TextField(Copy.shared.username, text: $username)
+                    .autocorrectionDisabled()
+                    .neverAutocapitalize()
+                SecureField(Copy.shared.password, text: $password)
+            }
+
+            Section {
+                Button(Copy.shared.connect) {
+                    model.login(
+                        serverUrl: serverUrl,
+                        username: username,
+                        password: password
+                    )
+                }
+                .disabled(model.isLoading || serverUrl.isEmpty)
+
+                // No on-screen keyboard needed — ideal on Apple TV
+                Button(Copy.shared.quickConnect) {
+                    model.startQuickConnect(serverUrl: serverUrl)
+                }
+                .disabled(model.isLoading || serverUrl.isEmpty)
+
+                // Adding from the picker must always offer a way back
+                if model.addingProfile {
+                    Button(Copy.shared.backToProfiles, role: .cancel) {
+                        model.cancelAddProfile()
+                    }
+                }
+            }
+
+            if let code = model.quickConnectCode {
+                Section(Copy.shared.quickConnect) {
+                    Text(code)
+                        .font(.system(.largeTitle, design: .rounded).bold())
+                    Text(Copy.shared.enterCode)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            statusView
+        }
+        .navigationTitle(model.addingProfile ? Copy.shared.addProfile : "Jellystream")
+    }
+
+    @ViewBuilder
+    private var statusView: some View {
+        switch model.status {
+        case .idle:
+            EmptyView()
+        case .loading:
+            CinemaSpinner()
+        case .failure(let message):
+            Text(message).foregroundStyle(.red)
         }
     }
 }

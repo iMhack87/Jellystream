@@ -79,7 +79,7 @@ class RequestProgressTest {
         )!!
 
         assertEquals(41 * 60L, progress.remainingSeconds)
-        assertEquals("41 min left", progress.remainingLabel)
+        assertEquals(Copy.remainingMinutes(41), progress.remainingLabel)
     }
 
     @Test
@@ -104,7 +104,7 @@ class RequestProgressTest {
         )!!
 
         assertTrue(progress.isFinishing)
-        assertEquals("100% · Finishing up", progress.summary)
+        assertEquals("100% · ${Copy.finishingUp}", progress.summary)
     }
 
     @Test
@@ -114,7 +114,7 @@ class RequestProgressTest {
         )!!
 
         assertFalse(progress.isStalled)
-        assertEquals("62% · 13 min left", progress.summary)
+        assertEquals("62% · ${Copy.remainingMinutes(13)}", progress.summary)
     }
 }
 
@@ -158,33 +158,33 @@ class RemainingLabelTest {
 
     @Test
     fun secondsAreNotWorthACountdown() {
-        assertEquals("Any moment now", RequestProgress.formatRemaining(0))
-        assertEquals("Under a minute left", RequestProgress.formatRemaining(40))
+        assertEquals(Copy.anyMomentNow, RequestProgress.formatRemaining(0))
+        assertEquals(Copy.underAMinuteLeft, RequestProgress.formatRemaining(40))
     }
 
     @Test
     fun minutesRoundUpSoNothingEverReadsAsZero() {
-        assertEquals("1 min left", RequestProgress.formatRemaining(60))
+        assertEquals(Copy.remainingMinutes(1), RequestProgress.formatRemaining(60))
         // A partial minute counts as a whole one: "2 min" is a promise the
         // download can keep, "1 min" for 61 seconds is not
-        assertEquals("2 min left", RequestProgress.formatRemaining(61))
-        assertEquals("13 min left", RequestProgress.formatRemaining(754))
+        assertEquals(Copy.remainingMinutes(2), RequestProgress.formatRemaining(61))
+        assertEquals(Copy.remainingMinutes(13), RequestProgress.formatRemaining(754))
     }
 
     @Test
     fun theCarryIsDoneOnceOrYouShipAnHourAndSixtyMinutes() {
         // 1 h 59 min 59 s: rounding minutes and hours separately gives
         // "1 h 60 min left"
-        assertEquals("2 h left", RequestProgress.formatRemaining(7199))
-        assertEquals("1 h 1 min left", RequestProgress.formatRemaining(3660))
-        assertEquals("1 h left", RequestProgress.formatRemaining(3599))
+        assertEquals(Copy.remainingHours(2), RequestProgress.formatRemaining(7199))
+        assertEquals(Copy.remainingHoursMinutes(1, 1), RequestProgress.formatRemaining(3660))
+        assertEquals(Copy.remainingHours(1), RequestProgress.formatRemaining(3599))
     }
 
     @Test
     fun pastADayTheEstimateIsGuessworkAndReadsLikeIt() {
-        assertEquals("About a day left", RequestProgress.formatRemaining(24 * 3600))
+        assertEquals(Copy.remainingAboutADay, RequestProgress.formatRemaining(24 * 3600))
         // 25 hours must not read as two days
-        assertEquals("About a day left", RequestProgress.formatRemaining(25 * 3600))
-        assertEquals("About 2 days left", RequestProgress.formatRemaining(47 * 3600))
+        assertEquals(Copy.remainingAboutADay, RequestProgress.formatRemaining(25 * 3600))
+        assertEquals(Copy.remainingDays(2), RequestProgress.formatRemaining(47 * 3600))
     }
 }

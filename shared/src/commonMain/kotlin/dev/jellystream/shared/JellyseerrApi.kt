@@ -171,12 +171,12 @@ class JellyseerrApi {
         // Season 0 is the specials bucket, which "all" excludes anyway;
         // letting it through alone would silently ask for the whole show.
         val picked = seasons.filter { it > 0 }.distinct().sorted()
-        if (picked.isEmpty()) return RequestOutcome.Failed("Pick at least one season")
+        if (picked.isEmpty()) return RequestOutcome.Failed(Copy.pickAtLeastOneSeason)
         return post(requestBody(tmdbId, isSeries = true, seasons = picked))
     }
 
     private suspend fun post(body: JsonObject): RequestOutcome {
-        val base = baseUrl ?: return RequestOutcome.Failed("No Jellyseerr server set")
+        val base = baseUrl ?: return RequestOutcome.Failed(Copy.noSeerrServer)
         if (cookie == null) return RequestOutcome.NotSignedIn
         return try {
             val response: HttpResponse = http.post("$base/api/v1/request") {
@@ -206,14 +206,14 @@ class JellyseerrApi {
                     if (message != null && message.contains("no seasons available", ignoreCase = true)) {
                         RequestOutcome.AlreadyRequested
                     } else {
-                        RequestOutcome.Failed(message ?: "Jellyseerr said ${response.status.value}")
+                        RequestOutcome.Failed(message ?: Copy.seerrSaid(response.status.value))
                     }
                 }
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            RequestOutcome.Failed(e.message ?: "Could not reach Jellyseerr")
+            RequestOutcome.Failed(e.message ?: Copy.couldNotReachSeerr)
         }
     }
 

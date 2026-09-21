@@ -15,13 +15,13 @@ data class NextEpisodeOffer(
     val startsNewSeason: Boolean,
 ) {
     val heading: String
-        get() = if (startsNewSeason) "Next season" else "Up next"
+        get() = if (startsNewSeason) Copy.nextSeason else Copy.upNext
 
     /** "S1 · E2 · The Title", or as much of it as the server sent. */
     val label: String
         get() = listOfNotNull(episode.episodeLabel, episode.name)
             .joinToString(" · ")
-            .ifEmpty { "Next episode" }
+            .ifEmpty { Copy.nextEpisode }
 
     /**
      * Where it would start from, in seconds. Non-zero only for an episode

@@ -2,6 +2,7 @@ import SwiftUI
 import Combine
 import Shared
 import Libmpv
+import QuartzCore
 
 // Minimal libmpv player: renders into a CAMetalLayer via gpu-next/Vulkan
 // (MoltenVK, shipped by MPVKit). mpv+FFmpeg is what gives Jellystream
@@ -65,6 +66,10 @@ final class PlayerModel: ObservableObject {
     private var tickCount = 0
     /// Lets the server terminate the transcode job on Stopped.
     private var playSessionId: String?
+    /// DirectPlay / Transcode — the dashboard should match what the player did.
+    private var playMethod: String = "DirectPlay"
+    /// Kept for the stats overlay; empty until PlaybackInfo answers.
+    @Published var stats: PlaybackStats = PlaybackStats.companion.Empty
     /// Intro/outro markers in media time (empty when the server has none).
     private var segments: [MediaSegment] = []
     /// HLS transcodes start at the resume point, so mpv's clock is
@@ -154,6 +159,14 @@ final class PlayerModel: ObservableObject {
                 return
             }
             self.playSessionId = plan?.playSessionId
+            self.playMethod = plan?.playMethod ?? "DirectPlay"
+            self.stats = plan?.stats ?? PlaybackStats.companion.Empty
+            let fps = plan?.stats.frameRateValue() ?? 0
+            let preferred = DisplayRefresh.shared.preferredRateValue(frameRate: fps)
+            if preferred > 0 {
+                self.setString("display-fps-override", "\(preferred)")
+                self.setString("video-sync", "display-resample")
+            }
             if plan?.isTranscode == true {
                 // The server already starts the HLS window at the resume
                 // point (StartTimeTicks); seeking again would double-apply
@@ -175,7 +188,8 @@ final class PlayerModel: ObservableObject {
             self.subtitleDefaultPending = true
             try? await self.api.reportPlaybackStart(
                 itemId: self.item.id,
-                playSessionId: plan?.playSessionId
+                playSessionId: plan?.playSessionId,
+                playMethod: plan?.playMethod ?? "DirectPlay"
             )
         }
 
@@ -236,11 +250,12 @@ final class PlayerModel: ObservableObject {
         mpv = nil
         mpv_terminate_destroy(handle)
         // Fire-and-forget: the resume point must survive closing the player
-        Task { [api, item, playSessionId] in
+        Task { [api, item, playSessionId, playMethod] in
             try? await api.reportPlaybackStopped(
                 itemId: item.id,
                 positionTicks: finalTicks,
-                playSessionId: playSessionId
+                playSessionId: playSessionId,
+                playMethod: playMethod
             )
         }
     }
@@ -398,12 +413,13 @@ final class PlayerModel: ObservableObject {
             // Media time (window position + transcode offset), like Android
             let ticks = JellyfinApi.companion.secondsToTicks(seconds: positionOffset + timePos)
             let paused = isPaused
-            Task { [api, item, playSessionId] in
+            Task { [api, item, playSessionId, playMethod] in
                 try? await api.reportPlaybackProgress(
                     itemId: item.id,
                     positionTicks: ticks,
                     isPaused: paused,
-                    playSessionId: playSessionId
+                    playSessionId: playSessionId,
+                    playMethod: playMethod
                 )
             }
         }
@@ -451,6 +467,42 @@ final class PlayerModel: ObservableObject {
     }
 }
 
+#if os(macOS)
+import AppKit
+import QuartzCore
+
+struct MPVPlayerView: NSViewRepresentable {
+    @ObservedObject var model: PlayerModel
+    let forceTranscode: Bool
+
+    func makeNSView(context: Context) -> MetalHostView {
+        let view = MetalHostView()
+        model.attach(to: view.metalLayer, forceTranscode: forceTranscode)
+        return view
+    }
+
+    func updateNSView(_ nsView: MetalHostView, context: Context) {}
+
+    final class MetalHostView: NSView {
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            wantsLayer = true
+            let metal = CAMetalLayer()
+            metal.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
+            layer = metal
+        }
+
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+        var metalLayer: CAMetalLayer { layer as! CAMetalLayer }
+
+        override func layout() {
+            super.layout()
+            metalLayer.frame = bounds
+        }
+    }
+}
+#else
 struct MPVPlayerView: UIViewRepresentable {
     @ObservedObject var model: PlayerModel
     /// Read from the environment by PlayerScreen and passed down, so the
@@ -471,6 +523,7 @@ struct MPVPlayerView: UIViewRepresentable {
         var metalLayer: CAMetalLayer { layer as! CAMetalLayer }
     }
 }
+#endif
 
 /**
  The player as the rest of the app knows it — and the one thing that
@@ -517,6 +570,9 @@ struct PlayerScreen: View {
             onPlayNext: { item = $0 }
         )
         .id(item.id)
+        #if os(macOS)
+        .frame(minWidth: 960, minHeight: 540)
+        #endif
     }
 }
 
@@ -550,6 +606,10 @@ private struct PlayerHost: View {
     /// Seconds before the next episode starts on its own, nil when nothing
     /// is counting. Only ever set while the card has no question of its own.
     @State private var countdown: Int?
+    @State private var showStats = false
+    @State private var showChapters = false
+    @State private var chapters: [ChapterInfo] = []
+    @State private var trickplay: TrickplayInfo?
 
     // Settings arrive as a parameter, not from the environment: the model
     // is built in init, before @Environment is readable, and mpv needs the
@@ -595,9 +655,32 @@ private struct PlayerHost: View {
 
             #if os(tvOS)
             if showTracks {
-                TrackPanel(model: model)
+                TrackPanel(
+                    model: model,
+                    onInfo: {
+                        showTracks = false
+                        showStats.toggle()
+                    },
+                    onChapters: chapters.isEmpty ? nil : {
+                        showTracks = false
+                        showChapters = true
+                    }
+                )
             }
             #endif
+
+            if showChapters, !chapters.isEmpty {
+                ChapterStrip(
+                    api: model.api,
+                    itemId: model.item.id,
+                    chapters: chapters,
+                    onSeek: { seconds in
+                        model.seek(to: seconds - 0)
+                        showChapters = false
+                    },
+                    onClose: { showChapters = false }
+                )
+            }
 
             // There is a next episode to play, or a next season Jellyseerr
             // could go and get, or both. Raised only when the file actually
@@ -606,6 +689,20 @@ private struct PlayerHost: View {
             if showOffer, hasEndCard {
                 endCard(next: model.nextEpisodeOffer, season: model.nextSeasonOffer)
             }
+
+            #if os(tvOS)
+            if showStats {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(model.stats.lines(), id: \.self) { line in
+                        Text(line).font(.caption.monospaced()).foregroundStyle(.white)
+                    }
+                }
+                .padding(14)
+                .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 10))
+                .padding(28)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+            #endif
         }
         .animation(.easeInOut(duration: 0.25), value: model.skipSegment == nil)
         // Two empty advisors mean today's behaviour: the file ends, nothing
@@ -621,7 +718,11 @@ private struct PlayerHost: View {
             // Menu closes whatever sits on top of the video, innermost
             // first. Quitting the player instead would throw the viewer out
             // of the episode for pressing the one obvious "go back" key.
-            if showOffer {
+            if showChapters {
+                showChapters = false
+            } else if showStats {
+                showStats = false
+            } else if showOffer {
                 dismissOffer()
             } else if showTracks {
                 showTracks = false
@@ -634,7 +735,7 @@ private struct PlayerHost: View {
         // Never steal focus while another overlay is open — the pill is
         // hidden then, and re-grabs when that overlay closes mid-segment.
         .onChange(of: model.skipSegment == nil) { _, isNil in
-            skipFocused = !isNil && !showTracks && !showOffer
+            skipFocused = !isNil && !showTracks && !showOffer && !showChapters
         }
         .onChange(of: showTracks) { _, open in
             if !open && !showOffer && model.skipSegment != nil {
@@ -650,6 +751,12 @@ private struct PlayerHost: View {
         }
         #endif
         .onDisappear { model.shutdown() }
+        .task {
+            if let full = try? await model.api.getItem(itemId: model.item.id) {
+                chapters = full.chapterList()
+                trickplay = Trickplay.shared.pick(manifest: full.trickplay, sourceId: nil)
+            }
+        }
     }
 
     private var playbackLayer: some View {
@@ -679,6 +786,37 @@ private struct PlayerHost: View {
                             .foregroundStyle(.white.opacity(0.7))
                     }
                     Spacer()
+                    Button {
+                        showStats.toggle()
+                    } label: {
+                        Image(systemName: "info.circle")
+                            .font(.title2)
+                            .foregroundStyle(.white.opacity(0.8))
+                    }
+                    if !chapters.isEmpty {
+                        Button {
+                            showChapters.toggle()
+                        } label: {
+                            Image(systemName: "list.bullet")
+                                .font(.title2)
+                                .foregroundStyle(.white.opacity(0.8))
+                        }
+                    }
+                    #if os(iOS)
+                    AirPlayLaunchButton(model: model)
+                    #endif
+                }
+                if showStats {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(model.stats.lines(), id: \.self) { line in
+                                Text(line).font(.caption.monospaced()).foregroundStyle(.white)
+                            }
+                        }
+                        .padding(10)
+                        .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 10))
+                        Spacer()
+                    }
                 }
                 Spacer()
                 controls
@@ -691,7 +829,7 @@ private struct PlayerHost: View {
             // yields to the track panel — one overlay owns the Focus Engine
             // at a time (same discipline as .focusable(!showTracks)).
             #if os(tvOS)
-            let skipPillHidden = showTracks || showOffer
+            let skipPillHidden = showTracks || showOffer || showChapters
             #else
             // No Focus Engine to fight over here, but a Skip Credits pill
             // underneath the offer card is still two answers to one question
@@ -705,7 +843,7 @@ private struct PlayerHost: View {
                         Button {
                             model.skipCurrentSegment()
                         } label: {
-                            Text(segment.isOutro ? "Skip Credits" : "Skip Intro")
+                            Text(segment.isOutro ? Copy.shared.skipCredits : Copy.shared.skipIntro)
                                 .font(.headline)
                                 #if !os(tvOS)
                                 .padding(.horizontal, 22)
@@ -817,19 +955,19 @@ private struct PlayerHost: View {
                 if let season {
                     Text(
                         offerSent
-                            ? "Season \(season.seasonNumber) requested — it'll appear once it downloads."
+                            ? Copy.shared.seasonRequestedLanding(n: season.seasonNumber)
                             : season.title
                     )
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.75))
                 }
                 if let countdown {
-                    Text("Playing in \(countdown)s")
+                    Text(Copy.shared.playingIn(seconds: Int32(countdown)))
                         .font(.subheadline.monospacedDigit())
                         .foregroundStyle(.white.opacity(0.75))
                 }
             } else if offerSent {
-                Text("Requested — it'll appear once it downloads.")
+                Text(Copy.shared.requestedLanding)
                     .font(.headline)
                     .foregroundStyle(.white)
             } else if let season {
@@ -932,7 +1070,7 @@ private struct PlayerHost: View {
                 }
 
                 if !season.alreadyRequested {
-                    offerButton("Not now", isPrimary: false, focus: .secondary) { dismissOffer() }
+                    offerButton(Copy.shared.notNow, isPrimary: false, focus: .secondary) { dismissOffer() }
                 }
             }
             .padding(.top, 4)
@@ -942,7 +1080,7 @@ private struct PlayerHost: View {
     /// The up-next card's actions, laid out by the caller.
     @ViewBuilder
     private func upNextActions(next: NextEpisodeOffer, season: NextSeasonOffer?) -> some View {
-        offerButton("Play now", isPrimary: true, focus: .primary) { playNext(next) }
+        offerButton(Copy.shared.playNow, isPrimary: true, focus: .primary) { playNext(next) }
 
         // Pressing it again is harmless — Jellyseerr answers "already
         // requested", which reads the same to the viewer. That is why the
@@ -951,7 +1089,7 @@ private struct PlayerHost: View {
         // mid-request hands the remote to whatever happens to be next.
         if let season, !season.alreadyRequested {
             offerButton(
-                offerSent ? "Requested" : "Request season \(season.seasonNumber)",
+                offerSent ? Copy.shared.requestedShort : Copy.shared.requestSeason(n: season.seasonNumber),
                 isPrimary: false,
                 focus: .secondary
             ) {
@@ -959,12 +1097,12 @@ private struct PlayerHost: View {
             }
         }
 
-        offerButton("Not now", isPrimary: false, focus: .tertiary) { dismissOffer() }
+        offerButton(Copy.shared.notNow, isPrimary: false, focus: .tertiary) { dismissOffer() }
     }
 
     private func primaryTitle(for offer: NextSeasonOffer) -> String {
-        if offer.alreadyRequested { return "OK" }
-        return "Request season \(offer.seasonNumber)"
+        if offer.alreadyRequested { return Copy.shared.ok }
+        return Copy.shared.requestSeason(n: offer.seasonNumber)
     }
 
     // tvOS buttons stay unstyled so the system focus ring is the affordance;
@@ -1041,11 +1179,11 @@ private struct PlayerHost: View {
                     }
                 }
             case is RequestOutcome.NotSignedIn:
-                offerNotice = "Sign in to Jellyseerr again in Settings"
+                offerNotice = Copy.shared.signInSeerrAgain
             case let failure as RequestOutcome.Failed:
                 offerNotice = failure.message
             default:
-                offerNotice = "Could not reach Jellyseerr"
+                offerNotice = Copy.shared.couldNotReachSeerr
             }
         }
     }
@@ -1102,9 +1240,9 @@ private struct PlayerHost: View {
                         model.selectSubtitleTrack(id: nil)
                     } label: {
                         if !model.subtitleTracks.contains(where: \.selected) {
-                            Label("Off", systemImage: "checkmark")
+                            Label(Copy.shared.off, systemImage: "checkmark")
                         } else {
-                            Text("Off")
+                            Text(Copy.shared.off)
                         }
                     }
                     ForEach(model.subtitleTracks) { track in
@@ -1122,22 +1260,22 @@ private struct PlayerHost: View {
                     // Timing lives with the track it applies to, and only
                     // once one is actually on
                     if model.subtitleTracks.contains(where: \.selected) {
-                        Section("Sync \(Self.delayLabel(model.subtitleDelay))") {
+                        Section("\(Copy.shared.sync) \(Self.delayLabel(model.subtitleDelay))") {
                             Button {
                                 model.nudgeSubtitleDelay(by: -PlayerModel.subtitleDelayStep)
                             } label: {
-                                Label("Earlier", systemImage: "gobackward")
+                                Label(Copy.shared.earlier, systemImage: "gobackward")
                             }
                             Button {
                                 model.nudgeSubtitleDelay(by: PlayerModel.subtitleDelayStep)
                             } label: {
-                                Label("Later", systemImage: "goforward")
+                                Label(Copy.shared.later, systemImage: "goforward")
                             }
                             if model.subtitleDelay != 0 {
                                 Button {
                                     model.resetSubtitleDelay()
                                 } label: {
-                                    Label("Reset", systemImage: "arrow.counterclockwise")
+                                    Label(Copy.shared.reset, systemImage: "arrow.counterclockwise")
                                 }
                             }
                         }
@@ -1173,11 +1311,19 @@ private struct PlayerHost: View {
 /** Focusable audio/subtitle picker — swipe down on the remote to open. */
 private struct TrackPanel: View {
     @ObservedObject var model: PlayerModel
+    var onInfo: () -> Void
+    var onChapters: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
+            HStack(spacing: 16) {
+                Button(Copy.shared.info, action: onInfo)
+                if let onChapters {
+                    Button(Copy.shared.chapters, action: onChapters)
+                }
+            }
             if model.audioTracks.count > 1 {
-                Text("Audio").font(.headline)
+                Text(Copy.shared.audio).font(.headline)
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 16) {
                         ForEach(model.audioTracks) { track in
@@ -1190,10 +1336,10 @@ private struct TrackPanel: View {
                 }
             }
             if !model.subtitleTracks.isEmpty {
-                Text("Subtitles").font(.headline)
+                Text(Copy.shared.subtitles).font(.headline)
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 16) {
-                        Button("Off") {
+                        Button(Copy.shared.off) {
                             model.selectSubtitleTrack(id: nil)
                         }
                         .foregroundStyle(
@@ -1233,7 +1379,7 @@ private struct SubtitleDelayRow: View {
 
     var body: some View {
         HStack(spacing: 16) {
-            Text("Sync").font(.headline)
+            Text(Copy.shared.sync).font(.headline)
             Button("−\(Self.stepLabel)") {
                 model.nudgeSubtitleDelay(by: -PlayerModel.subtitleDelayStep)
             }
@@ -1244,7 +1390,7 @@ private struct SubtitleDelayRow: View {
                 model.nudgeSubtitleDelay(by: PlayerModel.subtitleDelayStep)
             }
             if model.subtitleDelay != 0 {
-                Button("Reset") { model.resetSubtitleDelay() }
+                Button(Copy.shared.reset) { model.resetSubtitleDelay() }
             }
         }
     }
@@ -1259,3 +1405,118 @@ private struct SubtitleDelayRow: View {
     }
 }
 #endif
+
+private struct ChapterStrip: View {
+    let api: JellyfinApi
+    let itemId: String
+    let chapters: [ChapterInfo]
+    let onSeek: (Double) -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(Copy.shared.chapters).font(.headline).foregroundStyle(.white)
+                Spacer()
+                Button(Copy.shared.close, action: onClose)
+            }
+            .padding(.horizontal, 20)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(Array(chapters.enumerated()), id: \.offset) { index, chapter in
+                        Button {
+                            onSeek(chapter.startSeconds)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 6) {
+                                AsyncImage(
+                                    url: api.chapterImageUrl(
+                                        itemId: itemId,
+                                        index: Int32(index),
+                                        tag: chapter.imageTag,
+                                        maxWidth: 280
+                                    ).flatMap(URL.init(string:))
+                                ) { image in
+                                    image.resizable().scaledToFill()
+                                } placeholder: {
+                                    Rectangle().fill(Color.white.opacity(0.12))
+                                }
+                                .frame(width: 140, height: 80)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                Text(chapter.name ?? "Chapter \(index + 1)")
+                                    .font(.caption)
+                                    .foregroundStyle(.white)
+                                    .lineLimit(2)
+                            }
+                            .frame(width: 140)
+                        }
+                        #if os(tvOS)
+                        .buttonStyle(.borderless)
+                        #else
+                        .buttonStyle(.plain)
+                        #endif
+                    }
+                }
+                .padding(.horizontal, 20)
+            }
+        }
+        .padding(.vertical, 16)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+    }
+}
+
+#if os(iOS)
+import AVKit
+
+/// Opens the system player on an HLS transcode so AirPlay can take the
+/// picture. mpv cannot AirPlay video; AVPlayer can, and the original file
+/// stays Direct Play on this device until this button is pressed.
+private struct AirPlayLaunchButton: View {
+    @ObservedObject var model: PlayerModel
+    @State private var busy = false
+
+    var body: some View {
+        Button {
+            Task { await start() }
+        } label: {
+            Image(systemName: busy ? "progress.indicator" : "airplayvideo")
+                .font(.title2)
+                .foregroundStyle(.white.opacity(0.8))
+        }
+        .disabled(busy)
+    }
+
+    @MainActor
+    private func start() async {
+        busy = true
+        defer { busy = false }
+        model.togglePause()
+        guard let plan = try? await model.api.getPlaybackPlan(
+            item: model.item,
+            forceTranscode: true
+        ) else { return }
+        let urlString = model.api.headerlessUrl(plan: plan) ?? plan.url
+        guard let url = URL(string: urlString) else { return }
+        var headers: [String: String] = [:]
+        if let auth = model.api.streamAuthorizationHeader() {
+            headers["Authorization"] = auth
+        }
+        let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
+        let player = AVPlayer(playerItem: AVPlayerItem(asset: asset))
+        let controller = AVPlayerViewController()
+        controller.player = player
+        controller.allowsPictureInPicturePlayback = true
+        player.play()
+        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let root = scene.keyWindow?.rootViewController
+                ?? scene.windows.first?.rootViewController else { return }
+        var presenter = root
+        while let shown = presenter.presentedViewController {
+            presenter = shown
+        }
+        presenter.present(controller, animated: true)
+    }
+}
+#endif
+

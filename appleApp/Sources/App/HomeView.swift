@@ -10,6 +10,10 @@ struct LibrarySection: Identifiable {
     /// The two rows that are drawn as landscape cards with a progress
     /// bar, and the two the new rows have to come after.
     var isContinue: Bool { key == "resume" || key == "nextup" }
+
+    /// Jellyfin's genre Primary is a landscape collage of posters. Cropping
+    /// it to a 2:3 tile slices through the mosaic and looks broken.
+    var isGenres: Bool { key == "genres" }
 }
 
 struct HomeView: View {
@@ -55,7 +59,7 @@ struct HomeView: View {
             .environment(\.downloadingAllowed, downloadingAllowed)
             .task { downloadingAllowed = try? await api.canDownload()?.boolValue }
             .preferredColorScheme(.dark)
-            .fullScreenCover(item: $playingItem) { item in
+            .playerCover(item: $playingItem) { item in
                 PlayerScreen(api: api, item: item, settings: settings, seerr: seerr)
             }
             #if !os(tvOS)
@@ -70,12 +74,12 @@ struct HomeView: View {
                                 offlineItem = item
                             }
                         )
-                        .toolbar { Button("Done") { showDownloads = false } }
+                        .toolbar { Button(Copy.shared.done) { showDownloads = false } }
                     }
                     .preferredColorScheme(.dark)
                 }
             }
-            .fullScreenCover(item: $offlineItem) { offline in
+            .playerCover(item: $offlineItem) { offline in
                 if let downloader, let profile {
                     PlayerScreen(
                         api: api,
@@ -88,7 +92,8 @@ struct HomeView: View {
                             indexNumber: nil, parentIndexNumber: nil,
                             backdropImageTags: nil, parentBackdropItemId: nil,
                             parentBackdropImageTags: nil, premiereDate: nil,
-                            providerIds: nil
+                            providerIds: nil, people: nil, genreItems: nil,
+                            chapters: nil, trickplay: nil, primaryImageTag: nil
                         ),
                         settings: settings,
                         // Offline: this synthetic BaseItem is a "Movie" with
@@ -118,14 +123,14 @@ struct HomeView: View {
                 homeScroll
                     .itemDestination(api: api, seerr: seerr)
             }
-            .tabItem { Label("Home", systemImage: "house") }
+            .tabItem { Label(Copy.shared.home, systemImage: "house") }
             .tag(Tab.home)
 
             NavigationStack {
                 SearchView(api: api, seerr: seerr)
                     .itemDestination(api: api, seerr: seerr)
             }
-            .tabItem { Label("Search", systemImage: "magnifyingglass") }
+            .tabItem { Label(Copy.shared.search, systemImage: "magnifyingglass") }
             .tag(Tab.search)
 
             NavigationStack {
@@ -158,13 +163,13 @@ struct HomeView: View {
                         AvatarCircle(initial: session.initial, size: 28)
                     }
                 }
-                .toolbarColorScheme(.dark, for: .navigationBar)
+                .darkNavigationBar()
         }
         .sheet(isPresented: $showSettings) {
             NavigationStack {
                 settingsScreen
                     .toolbar {
-                        Button("Done") { showSettings = false }
+                        Button(Copy.shared.done) { showSettings = false }
                     }
             }
             .preferredColorScheme(.dark)
@@ -196,16 +201,12 @@ struct HomeView: View {
                 // NSURLError dump and no way to them is the worst possible
                 // screen to meet on a train
                 VStack(spacing: 14) {
-                    Text("Can't reach the server.").font(.headline)
+                    Text(Copy.shared.cantReachServer).font(.headline)
                     if playableDownloads > 0 {
-                        Text(
-                            "\(playableDownloads) downloaded "
-                            + (playableDownloads == 1 ? "title is" : "titles are")
-                            + " still on this device."
-                        )
+                        Text(Copy.shared.downloadsStillOnDevice(n: Int32(playableDownloads)))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                        Button("Go to downloads") { showDownloads = true }
+                        Button(Copy.shared.goToDownloads) { showDownloads = true }
                             .buttonStyle(.borderedProminent)
                     } else {
                         Text(error).font(.caption).foregroundStyle(.secondary)
@@ -268,7 +269,7 @@ struct HomeView: View {
                 }
                 .ignoresSafeArea(edges: .top)
             } else {
-                ProgressView()
+                CinemaLoading()
             }
         }
         .background(Color.black)
@@ -291,16 +292,22 @@ struct HomeView: View {
         do {
             var result: [LibrarySection] = []
             if let resume = try? await api.getResumeItems(limit: 12), !resume.isEmpty {
-                result.append(LibrarySection(title: "Continue Watching", key: "resume", items: resume))
+                result.append(LibrarySection(title: Copy.shared.continueWatching, key: "resume", items: resume))
             }
             if let nextUp = try? await api.getNextUp(limit: 12), !nextUp.isEmpty {
-                result.append(LibrarySection(title: "Next Up", key: "nextup", items: nextUp))
+                result.append(LibrarySection(title: Copy.shared.nextUp, key: "nextup", items: nextUp))
+            }
+            if let collections = try? await api.getCollections(limit: 24), !collections.isEmpty {
+                result.append(LibrarySection(title: Copy.shared.collections, key: "collections", items: collections))
+            }
+            if let genres = try? await api.getGenres(parentId: "", limit: 24), !genres.isEmpty {
+                result.append(LibrarySection(title: Copy.shared.genres, key: "genres", items: genres))
             }
             let views = settings.visibleLibraries(views: try await api.getUserViews())
             for view in views {
                 // One failing view must not blank the whole home screen
                 let latest = (try? await api.getLatestItems(viewId: view.id, limit: 12)) ?? []
-                result.append(LibrarySection(title: view.name ?? "Library", key: view.id, items: latest))
+                result.append(LibrarySection(title: view.name ?? Copy.shared.library, key: view.id, items: latest))
             }
             sections = result
         } catch {
@@ -321,6 +328,8 @@ extension View {
         navigationDestination(for: BaseItem.self) { item in
             if item.isSeries {
                 SeriesView(api: api, seerr: seerr, series: item)
+            } else if item.isBoxSet || item.isPerson || item.isGenre {
+                CatalogView(api: api, item: item)
             } else {
                 DetailView(api: api, seerr: seerr, item: item)
             }
@@ -416,7 +425,7 @@ private struct HeroSection: View {
                     if item.isPlayable {
                         Button(action: onPlay) {
                             Label(
-                                item.resumePositionSeconds > 60 ? "Resume" : "Play",
+                                item.resumePositionSeconds > 60 ? Copy.shared.resume : Copy.shared.play,
                                 systemImage: "play.fill"
                             )
                             .font(.headline)
@@ -433,7 +442,7 @@ private struct HeroSection: View {
                     }
 
                     NavigationLink(value: item) {
-                        Text("Details")
+                        Text(Copy.shared.details)
                             .font(.headline)
                             #if !os(tvOS)
                             .foregroundStyle(.white)
@@ -460,7 +469,7 @@ private struct HeroSection: View {
             parts.append("\(item.seriesName ?? "") \(label)".trimmingCharacters(in: .whitespaces))
         }
         if let year = item.productionYear { parts.append("\(year)") }
-        if let minutes = item.runtimeMinutes { parts.append("\(minutes) min") }
+        if let minutes = item.runtimeMinutes { parts.append(Copy.shared.minutes(n: Int32(minutes.intValue))) }
         return parts.joined(separator: "  ·  ")
     }
 }
@@ -523,7 +532,7 @@ private struct ContinueRow: View {
                             .frame(width: cardWidth)
                             #endif
                         }
-                        .disabled(!item.isPlayable && !item.isSeries)
+                        .disabled(!item.isBrowsable)
                         #if os(tvOS)
                         .buttonStyle(.borderless)
                         #else
@@ -589,15 +598,18 @@ private struct LibraryRow: View {
                 LazyHStack(alignment: .top, spacing: HomeMetrics.cardSpacing) {
                     ForEach(section.items, id: \.id) { item in
                         NavigationLink(value: item) {
-                            // Apple TV store card: the caption lives inside
-                            // the artwork on a bottom scrim — no sibling
-                            // text (Continue/Next Up rows keep theirs)
-                            PosterOverlayCard(api: api, item: item)
-                                #if os(tvOS)
-                                .hoverEffect(.highlight)
-                                #endif
+                            Group {
+                                if section.isGenres {
+                                    GenreCard(api: api, item: item)
+                                } else {
+                                    PosterOverlayCard(api: api, item: item)
+                                }
+                            }
+                            #if os(tvOS)
+                            .hoverEffect(.highlight)
+                            #endif
                         }
-                        .disabled(!item.isPlayable && !item.isSeries)
+                        .disabled(!item.isBrowsable)
                         #if os(tvOS)
                         .buttonStyle(.borderless)
                         #else
@@ -673,7 +685,7 @@ private struct RequestedRow: View {
         // empty for ever because it never got to ask.
         VStack(alignment: .leading, spacing: 0) {
             if !rows.isEmpty {
-                Shelf(title: "Requested & on the way") {
+                Shelf(title: Copy.shared.requestedOnTheWay) {
                     ForEach(rows, id: \.request.id) { row in
                         RequestedCard(row: row)
                     }
@@ -782,7 +794,7 @@ private struct WatchlistRow: View {
         // Never a Group: see RequestedRow — an EmptyView carries no task
         VStack(alignment: .leading, spacing: 0) {
             if !cards.isEmpty {
-                Shelf(title: "Watchlist") {
+                Shelf(title: Copy.shared.watchlist) {
                     ForEach(cards) { card in
                         WatchlistCardView(api: api, card: card)
                     }
@@ -917,7 +929,7 @@ private struct FavouritesRow: View {
                 LibraryRow(
                     api: api,
                     section: LibrarySection(
-                        title: "Favourites",
+                        title: Copy.shared.favourites,
                         key: "favourites",
                         items: items
                     )
@@ -927,6 +939,60 @@ private struct FavouritesRow: View {
         // Kotlin default arguments do not bridge — the limit is spelled out
         .padding(.bottom, items.isEmpty ? HomeMetrics.hiddenRowSpacing : 0)
         .task { items = (try? await api.getFavorites(limit: 24)) ?? [] }
+    }
+}
+
+/**
+ * Landscape tile for a genre. The artwork is atmosphere: Jellyfin ships a
+ * collage, and the name is what you actually pick.
+ */
+private struct GenreCard: View {
+    let api: JellyfinApi
+    let item: BaseItem
+
+    #if os(tvOS)
+    static let width: CGFloat = 440
+    static let height: CGFloat = 248
+    #else
+    static let width: CGFloat = 250
+    static let height: CGFloat = 141
+    #endif
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            AsyncImage(url: api.imageUrl(item: item, maxWidth: 800).flatMap { URL(string: $0) }) { image in
+                image.resizable().scaledToFill().blur(radius: 6)
+            } placeholder: {
+                Rectangle().fill(Color(white: 0.12))
+            }
+            .frame(width: Self.width, height: Self.height)
+            .clipped()
+
+            Color.black.opacity(0.4)
+
+            LinearGradient(
+                colors: [.black.opacity(0.85), .clear],
+                startPoint: .bottom,
+                endPoint: .center
+            )
+
+            Text((item.name ?? "").localizedCapitalized)
+                .font(.title3.bold())
+                .foregroundStyle(.white)
+                .lineLimit(2)
+                .shadow(color: .black.opacity(0.7), radius: 6, y: 1)
+                #if os(tvOS)
+                .padding(18)
+                #else
+                .padding(12)
+                #endif
+        }
+        .frame(width: Self.width, height: Self.height)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+        )
     }
 }
 

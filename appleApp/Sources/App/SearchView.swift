@@ -33,9 +33,9 @@ struct SearchView: View {
 
         var label: String {
             switch self {
-            case .all: return "All"
-            case .films: return "Films"
-            case .series: return "Series"
+            case .all: return Copy.shared.all
+            case .films: return Copy.shared.films
+            case .series: return Copy.shared.series
             }
         }
 
@@ -54,9 +54,9 @@ struct SearchView: View {
 
         var label: String {
             switch self {
-            case .all: return "All"
-            case .onServer: return "On the server"
-            case .requestable: return "Requestable"
+            case .all: return Copy.shared.all
+            case .onServer: return Copy.shared.onTheServer
+            case .requestable: return Copy.shared.requestable
             }
         }
 
@@ -103,7 +103,8 @@ struct SearchView: View {
             }
             .padding(.bottom, 40)
         }
-        .navigationTitle("Search")
+        .navigationTitle(Copy.shared.search)
+        .cinemaChrome()
         .searchable(text: $query)
         .task(id: searchKey) { await run() }
     }
@@ -209,16 +210,16 @@ struct SearchView: View {
             switch outcome {
             case is RequestOutcome.Sent:
                 justRequested[Int(result.id)] = .pending
-                notice = "Requested \(result.displayTitle)"
+                notice = Copy.shared.requested(title: result.displayTitle)
             case is RequestOutcome.AlreadyRequested:
                 justRequested[Int(result.id)] = .pending
-                notice = "\(result.displayTitle) was already requested"
+                notice = Copy.shared.alreadyRequestedTitle(title: result.displayTitle)
             case is RequestOutcome.NotSignedIn:
-                notice = "Sign in to Jellyseerr again in Settings"
+                notice = Copy.shared.signInSeerrAgain
             case let failure as RequestOutcome.Failed:
                 notice = failure.message
             default:
-                notice = "Could not reach Jellyseerr"
+                notice = Copy.shared.couldNotReachSeerr
             }
         }
     }

@@ -276,8 +276,8 @@ class JellyseerrTvDetailsTest {
 
     @Test
     fun aSeasonWithoutANameStillHasSomethingToPutOnAPill() {
-        assertEquals("Season 4", JellyseerrSeason(seasonNumber = 4).displayName)
-        assertEquals("Specials", JellyseerrSeason(seasonNumber = 0).displayName)
+        assertEquals(Copy.seasonNumber(4), JellyseerrSeason(seasonNumber = 4).displayName)
+        assertEquals(Copy.specials, JellyseerrSeason(seasonNumber = 0).displayName)
         assertEquals("Saison 2", JellyseerrSeason(seasonNumber = 2, name = "Saison 2").displayName)
     }
 }
@@ -304,8 +304,8 @@ class RequestedTitleTest {
     fun aRowWithoutADetailLookupStillSaysWhatItIs() {
         // The request endpoint answers with a TMDb id and no name; a
         // failed lookup must cost the title, not the row
-        assertEquals("Series request", RequestedTitle(row(isSeries = true)).displayTitle)
-        assertEquals("Film request", RequestedTitle(row(isSeries = false)).displayTitle)
+        assertEquals(Copy.seriesRequest, RequestedTitle(row(isSeries = true)).displayTitle)
+        assertEquals(Copy.filmRequest, RequestedTitle(row(isSeries = false)).displayTitle)
     }
 
     @Test
@@ -313,13 +313,13 @@ class RequestedTitleTest {
         val enriched = RequestedTitle(row(isSeries = true), title = "Severance", year = "2022")
 
         assertEquals("Severance", enriched.displayTitle)
-        assertEquals("Series · 2022", enriched.subtitle)
+        assertEquals("${Copy.series} · 2022", enriched.subtitle)
     }
 
     @Test
     fun aPartialRequestSaysWhichSeasonsItAskedFor() {
-        assertEquals("Season 2", row(isSeries = true, seasons = listOf(2)).seasonsLabel)
-        assertEquals("Seasons 2, 3", row(isSeries = true, seasons = listOf(3, 2)).seasonsLabel)
+        assertEquals(Copy.seasonNumber(2), row(isSeries = true, seasons = listOf(2)).seasonsLabel)
+        assertEquals(Copy.seasonsList("2, 3"), row(isSeries = true, seasons = listOf(3, 2)).seasonsLabel)
         // A film, and a series requested before Jellyseerr reported seasons
         assertNull(row(isSeries = false).seasonsLabel)
         assertNull(row(isSeries = true).seasonsLabel)
@@ -333,7 +333,7 @@ class RequestedTitleTest {
             year = "2022",
         )
 
-        assertEquals("Series · 2022 · Season 2", enriched.subtitle)
+        assertEquals("${Copy.series} · 2022 · ${Copy.seasonNumber(2)}", enriched.subtitle)
     }
 
     @Test
@@ -345,7 +345,7 @@ class RequestedTitleTest {
             ),
         )
 
-        assertEquals("75% · 5 min left", enriched.progress?.summary)
+        assertEquals("75% · ${Copy.remainingMinutes(5)}", enriched.progress?.summary)
     }
 
     @Test

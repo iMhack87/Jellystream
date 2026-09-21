@@ -1,6 +1,6 @@
 # Jellystream
 
-Lecteur Jellyfin Direct Play. Monorepo : `shared/` (KMP — API, modèles, moteur de décision Direct Play), `androidApp/` (Compose, mobile + Android TV), `appleApp/` (SwiftUI, iOS/iPadOS/tvOS via XcodeGen).
+Lecteur Jellyfin Direct Play. Monorepo : `shared/` (KMP — API, modèles, moteur de décision Direct Play), `androidApp/` (Compose, mobile + Android TV), `appleApp/` (SwiftUI, iOS/iPadOS/tvOS/macOS via XcodeGen).
 
 ## Maintenance de ce fichier
 
@@ -20,7 +20,10 @@ Toute session qui découvre un piège, change une commande de build ou de déplo
 cd appleApp && xcodegen generate
 xcodebuild -project Jellystream.xcodeproj -scheme Jellystream -destination 'generic/platform=iOS Simulator' build CODE_SIGNING_ALLOWED=NO   # iOS
 xcodebuild -project Jellystream.xcodeproj -scheme JellystreamTV -destination 'generic/platform=tvOS Simulator' build CODE_SIGNING_ALLOWED=NO # tvOS
+xcodebuild -project Jellystream.xcodeproj -scheme JellystreamMac -destination 'platform=macOS' build CODE_SIGNING_ALLOWED=NO             # Mac
 ```
+
+Signature Apple : équipe **B35G5Y85U9** (ZEF Computers, `contact@zefcomputers.com`). Une seule fiche App Store Connect, bundle `dev.jellystream.app`, plateformes iOS, tvOS **et** macOS. Archiver chaque cible (destination *generic iOS/tvOS device*, pas simulateur).
 
 ## Pièges connus
 
@@ -32,6 +35,7 @@ xcodebuild -project Jellystream.xcodeproj -scheme JellystreamTV -destination 'ge
 - **tvOS : ne JAMAIS remplacer un bouton focalisé par un autre via une branche `if`.** SwiftUI donne une identité propre à chaque branche : l'ancien bouton est détruit, le moteur de focus n'a rien où retomber (la racine n'est pas focalisable tant qu'une surcouche est ouverte), et le nouveau **dessine un anneau de focus qu'il ne possède pas**. La carte a l'air parfaitement normale et ignore chaque appui. Parade : **un seul bouton** dont le libellé et l'action changent (`primaryTitle(for:)`), jamais deux dans des branches distinctes.
   - Vérifié au simulateur tvOS, en pilotant la télécommande. **Deux tentatives de correction par le focus ont empiré les choses** (`focus = nil` puis réaffectation au tick suivant, puis un `.id()` stable) : le problème n'était pas la valeur du focus mais l'identité de la vue. Un `@FocusState` qui « affiche » le bon anneau ne prouve rien.
   - Corollaire de méthode : ce bug est passé à travers deux relectures adversariales et deux compilations vertes. Seul le pilotage réel l'a trouvé — `open -a Simulator` puis flèches/Entrée via computer-use (attention : une autre app peut reprendre le premier plan entre deux appels, cliquer d'abord dans la fenêtre du simulateur).
+- **Android PlayerView avale les taps de tout le Box qui le contient.** Un bouton Info posé *dans* `PlayerSurface`, à côté de l'`AndroidView`, se dessinait et ignorait chaque appui — le Close marchait parce qu'il est **frère** de `PlayerSurface`, pas fils. Parade : Info, Cast, chapitres et overlay stats sont des sœurs de `PlayerSurface`, comme le bouton Close. Vérifié à l'émulateur : Info ouvre les stats, qui restent quand les contrôles se cachent.
 - **Android : la priorité de `BackHandler` dépend de l'ordre d'enregistrement, pas de l'imbrication.** Le dispatcher appelle le *dernier* callback activé. Un overlay dont le handler apparaît après coup (quand un état bascule) gagne bien sur celui de `MainActivity` — mais c'est un argument de timing, pas une garantie. Vérifié à l'émulateur pour le sélecteur de saisons et la carte de fin d'épisode ; à re-tester si l'un des deux change de structure.
 - Les arguments par défaut Kotlin ne sont pas exportés vers Swift : toute API du module `shared` appelée depuis Swift doit être invocable avec tous ses paramètres explicites. **Corollaire qui mord** : ajouter un champ avec valeur par défaut à une data class partagée (ex. `PersistedSession.jellyseerr`) casse tous les appels Swift existants, qui l'omettaient légitimement.
 - **SwiftUI : un `Group { if cond { … } }` dont la condition est fausse se réduit à `EmptyView`, qui n'est PAS dans l'arbre — les modificateurs posés dessus (`.task`, `.onAppear`) ne s'exécutent jamais.** Une rangée « masquée quand vide » qui charge son contenu dans son propre `.task` reste donc vide à vie : elle n'a jamais pu demander. Utiliser un vrai conteneur (`VStack`) autour du `if`. Vaut pour les trois rangées home (demandes, watchlist, favoris).
@@ -40,6 +44,11 @@ xcodebuild -project Jellystream.xcodeproj -scheme JellystreamTV -destination 'ge
 - **`ProviderIds` (donc le TMDb id) n'arrive QUE sur `getItem`**, jamais dans les DTO de liste — vérifié sur `demo.jellyfin.org`. Une fonctionnalité qui relie Jellyfin à Jellyseerr doit re-fetcher l'item, pas se contenter de celui de la liste. La clé est `Tmdb` (lookup insensible à la casse : elle a bougé selon les versions) et la valeur est une **chaîne**, alors que Jellyseerr veut un entier.
 - **Jellyseerr répond `202` quand il n'y a rien à demander.** `POST /api/v1/request` sur des saisons déjà toutes prises lève `NoSeasonsAvailableError`, que la route traduit en **202** — vérifié dans les sources Overseerr *et* Seerr. Un client qui lit « 2xx = envoyé » annonce donc à l'utilisateur une saison qui n'a jamais été créée. Le banc renvoie ce 202 exprès, pour que l'erreur se produise ici et pas dans le salon.
 - **Le spec OpenAPI de Jellyseerr est incomplet là où ça compte** : `downloadStatus` (progression Sonarr/Radarr) n'y figure pas du tout, et `MediaRequest` y omet `seasons`. Modéliser à partir des entités TypeScript, pas du spec. Deux pièges de forme : `seasons` en POST est soit `"all"` soit un tableau de **numéros**, et `mediaInfo.seasons` est **creux** (seulement les saisons connues — une absence veut dire « demandable »).
+- **AirPlay / Chromecast ne Direct Play pas le MKV.** L'écran lointain reçoit un HLS (`getPlaybackPlan(..., forceTranscode=true)`). Le token pour un client sans header est `ApiKey=` (Jellyfin 10.12 ignore `api_key=`). Cast utilise le Default Media Receiver (`CC1AD845`), pas le receiver GPL Jellyfin. AirPlay = `AVPlayerViewController` côté iOS uniquement — mpv ne parle pas AirPlay.
+- **libmpv Android** : `dev.jdtech.mpv:libmpv` (MIT). Ne pas copier le wrapper GPL de Findroid. C'est un secours après un refus Media3, avant le transcodage.
+- **L’UI suit la langue du système via `Copy`** (`shared/.../Copy.kt` + `currentLanguageTag()`). Pas de `strings.xml` ni de `Localizable.xcstrings` : un littéral anglais dans Compose/SwiftUI reste anglais même si le Mac/téléphone est en français. Toute nouvelle chaîne visible passe par `Copy`. Les tests qui assertent un libellé doivent comparer à `Copy.*`, pas à une phrase anglaise — la machine de Matthieu est en français, et c’est ce qui a fait échouer les tests au premier passage.
+- **Les images de genre Jellyfin sont un collage paysage.** Un poster 2:3 coupe le mosaïque (bandeau de posters illisibles). La rangée Genres est en cartes 16:9, nom par-dessus.
+- **`fields=People,Chapters,Trickplay,GenreItems`** n'arrive que sur `getItem`. Un DTO de liste n'a que les noms de genres, pas les ids.
 
 ## Vérification E2E (simulateur / émulateur)
 
@@ -56,11 +65,12 @@ xcodebuild -project Jellystream.xcodeproj -scheme JellystreamTV -destination 'ge
 
 - **Keychain + builds non signés** : `SecItemAdd` échoue (errSecMissingEntitlement) sur les builds simulateur `CODE_SIGNING_ALLOWED=NO` → `SessionStore` retombe sur UserDefaults dans ce cas. Sur appareil signé, c'est bien le Keychain qui est utilisé. Corollaire utile en E2E : on peut pré-injecter une session pour sauter l'écran de login. La clé courante est **`dev.jellystream.profiles`** (`PersistedProfiles`, avec le lien Jellyseerr dedans) ; `dev.jellystream.session` est l'ancienne clé mono-session, encore lue mais seulement par la migration.
   ```bash
-  xcrun simctl spawn <udid> defaults write dev.jellystream.tv dev.jellystream.profiles -string '{"profiles":[{"deviceId":"bench","session":{"baseUrl":"http://localhost:8097","userId":"11111111111111111111111111111111","accessToken":"bench-token","userName":"bench","serverName":"Subtitle Bench"},"jellyseerr":{"baseUrl":"http://localhost:5055","sessionCookie":"connect.sid=bench-session"}}]}'
+  xcrun simctl spawn <udid> defaults write dev.jellystream.app dev.jellystream.profiles -string '{"profiles":[{"deviceId":"bench","session":{"baseUrl":"http://localhost:8097","userId":"11111111111111111111111111111111","accessToken":"bench-token","userName":"bench","serverName":"Subtitle Bench"},"jellyseerr":{"baseUrl":"http://localhost:5055","sessionCookie":"connect.sid=bench-session"}}]}'
   ```
 - **Piloter un réglage sans le toucher à l'écran.** Les `Toggle` d'un `Form` présenté en `.sheet` n'ont pas répondu aux taps injectés (vérifié : même `Always Transcode`, antérieur à toute modification, ne bascule pas) — ce n'est pas l'app. Pour tester une branche qui dépend d'un réglage, écrire le blob `PersistedSettings` sous la clé `dev.jellystream.settings`, **dans le plist du conteneur**, puis `simctl shutdown` + `boot` : `{"byProfile":{"<baseUrl>|<userId>":{"autoPlayNextEpisode":false}}}`. Un champ suffit, les autres reprennent leur défaut.
 - **La pré-injection `simctl spawn … defaults write` ne peut pas écraser une clé que l'app a déjà écrite elle-même.** Les écritures de l'app vont dans le plist de son conteneur (`simctl get_app_container <udid> <bundle> data` → `Library/Preferences/<bundle>.plist`), qui l'emporte ; `simctl spawn defaults` écrit ailleurs et ne sert donc qu'aux clés vierges (une session sur une install neuve). Pour rejouer un état déjà écrit (watchlist, arrivées annoncées) : éditer le plist du conteneur (python `plistlib`), puis **`simctl shutdown` + `boot`** — sans le redémarrage, cfprefsd ressert sa copie en cache et l'app lit l'ancienne valeur. Symptôme trompeur : `defaults read` montre la nouvelle valeur, l'écran montre l'ancienne.
 - **Simulateur tvOS : Échap ≠ Menu** (tvOS 26.5) : la touche Échap du clavier n'atteint jamais l'app (`onExitCommand` ne se déclenche pas, même hors panneau). Ne pas conclure à un bug app ; pour tester Menu, passer par Window > Show Apple TV Remote ou du matériel réel. Flèches et Entrée (select), eux, fonctionnent.
+- **Xcode 27 : plus de `Simulator.app`.** `open -a Simulator` échoue. L'hôte s'appelle **DeviceHub** (`/Applications/Xcode.app/Contents/Applications/DeviceHub.app`). `xcrun simctl io <udid> screenshot` marche ; les flèches/Entrée injectées via AppleScript n'atteignent pas le sim tvOS. Pour piloter : télécommande Apple TV dans DeviceHub, ou du matériel. Runtime tvOS à part : `xcodebuild -downloadPlatform tvOS` (le SDK compile sans lui, **lancer** l'app exige le runtime — vérifié : seul iOS 26.5 était installé).
 
 ## Intégration continue
 
@@ -68,6 +78,14 @@ xcodebuild -project Jellystream.xcodeproj -scheme JellystreamTV -destination 'ge
 
 Gratuit tant que le dépôt est **public** (minutes illimitées, runner macOS compris). S'il passait en privé : quota de 2 000 min/mois et **une minute macOS en coûte 10** → il faudrait réserver le job Apple à `main` ou au déclenchement manuel.
 
+## Signature Apple
+
+Compte `contact@zefcomputers.com`, équipe **B35G5Y85U9** (ZEF Computers). Posée dans `appleApp/project.yml` (`DEVELOPMENT_TEAM`). La CI simulateur reste en `CODE_SIGNING_ALLOWED=NO`. Icônes : `appleApp/Sources/iOS/Assets.xcassets` et `appleApp/Sources/tvOS/Assets.xcassets` ; Android `androidApp/src/main/res/mipmap-*`.
+
 ## Déploiement
 
-Aucun pour l'instant (pas de store, pas de CI). Merge sur `main` uniquement via PR approuvée par Matthieu.
+Play : paquet `dev.jellystream.android`, piste interne 1.0.0 (versionCode 1) envoyée. Keystore d'upload **hors git** : `androidApp/jellystream-upload.jks` + `androidApp/keystore.properties` — à sauvegarder, sans ça on ne pourra plus signer. L'API Play se pilote avec ADC (`gcloud auth application-default login` + scope `androidpublisher`) et le projet quota `project-bd51f2ff-7209-4eea-969`.
+
+Apple TestFlight : une fiche App Store Connect, bundle `dev.jellystream.app`, cases iOS + tvOS + macOS. L’upload part des schemes Jellystream, JellystreamTV et JellystreamMac vers cette même fiche.
+
+Merge sur `main` uniquement via PR approuvée par Matthieu.

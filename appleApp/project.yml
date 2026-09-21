@@ -9,6 +9,10 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "5.10"
+    # ZEF Computers — contact@zefcomputers.com (paid Individual team)
+    DEVELOPMENT_TEAM: B35G5Y85U9
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
     # The shared KMP framework ships arm64-only simulator slices (no Intel)
     "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
     "EXCLUDED_ARCHS[sdk=appletvsimulator*]": x86_64
@@ -19,6 +23,7 @@ targets:
     deploymentTarget: "17.0"
     sources:
       - Sources/App
+      - path: Sources/iOS/Assets.xcassets
     dependencies:
       - framework: ../shared/build/XCFrameworks/debug/Shared.xcframework
         embed: false
@@ -28,7 +33,13 @@ targets:
       path: Sources/iOS/Info.plist
       properties:
         CFBundleDisplayName: Jellystream
+        CFBundleShortVersionString: "1.0.0"
+        CFBundleVersion: "1"
+        ITSAppUsesNonExemptEncryption: false
+        UIRequiresFullScreen: true
         UILaunchScreen: {}
+        UIBackgroundModes:
+          - audio
         # Self-hosted Jellyfin servers are frequently plain http on the LAN
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
@@ -37,12 +48,14 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.jellystream.app
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
   JellystreamTV:
     type: application
     platform: tvOS
     deploymentTarget: "17.0"
     sources:
       - Sources/App
+      - path: Sources/tvOS/Assets.xcassets
     dependencies:
       - framework: ../shared/build/XCFrameworks/debug/Shared.xcframework
         embed: false
@@ -52,9 +65,45 @@ targets:
       path: Sources/tvOS/Info.plist
       properties:
         CFBundleDisplayName: Jellystream
+        CFBundleShortVersionString: "1.0.0"
+        CFBundleVersion: "1"
+        ITSAppUsesNonExemptEncryption: false
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.jellystream.tv
+        PRODUCT_BUNDLE_IDENTIFIER: dev.jellystream.app
         CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: "App Icon & Top Shelf Image"
+  JellystreamMac:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - Sources/App
+      - path: Sources/macOS/Assets.xcassets
+    dependencies:
+      - framework: ../shared/build/XCFrameworks/debug/Shared.xcframework
+        embed: false
+      - package: MPVKit
+        product: MPVKit
+    info:
+      path: Sources/macOS/Info.plist
+      properties:
+        CFBundleDisplayName: Jellystream
+        CFBundleShortVersionString: "1.0.0"
+        CFBundleVersion: "1"
+        ITSAppUsesNonExemptEncryption: false
+        LSApplicationCategoryType: public.app-category.entertainment
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.jellystream.app
+        PRODUCT_NAME: Jellystream
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_HARDENED_RUNTIME: YES
+        COMBINE_HIDPI_IMAGES: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_ENTITLEMENTS: Sources/macOS/Jellystream.entitlements
+        "EXCLUDED_ARCHS[sdk=macosx*]": x86_64

@@ -20,7 +20,7 @@ struct RatingsRow: View {
                         Image(systemName: "star.fill").foregroundStyle(Self.star)
                     }
                     .labelStyle(.titleAndIcon)
-                    .accessibilityLabel("Audience rating \(score) out of 10")
+                    .accessibilityLabel(Copy.shared.audienceRating(score: score))
                 }
 
                 if let percent = ratings.criticLabel {
@@ -28,7 +28,7 @@ struct RatingsRow: View {
                         .foregroundStyle(
                             ratings.criticIsFresh?.boolValue == true ? Self.fresh : Self.rotten
                         )
-                        .accessibilityLabel("Critic rating \(percent)")
+                        .accessibilityLabel(Copy.shared.criticRating(percent: percent))
                 }
 
                 if let certificate = ratings.officialLabel {

@@ -59,7 +59,7 @@ struct SeriesView: View {
         .ignoresSafeArea(edges: .top)
         .preferredColorScheme(.dark)
         #if !os(tvOS)
-        .navigationBarTitleDisplayMode(.inline)
+        .inlineNavigationTitle()
         #endif
         .task {
             // Refetch the show itself, as the Android twin does. The item
@@ -82,7 +82,7 @@ struct SeriesView: View {
             guard let season = selectedSeason else { return }
             episodes = (try? await api.getEpisodes(seriesId: series.id, seasonId: season.id)) ?? []
         }
-        .fullScreenCover(item: $playingItem) { playing in
+        .playerCover(item: $playingItem) { playing in
             PlayerScreen(api: api, item: playing, settings: appSettings, seerr: seerr)
         }
     }
@@ -142,7 +142,7 @@ struct SeriesView: View {
             .buttonStyle(.plain)
             .foregroundStyle(.white)
             #endif
-            .accessibilityLabel(series.isFavorite ? "Remove favourite" : "Add favourite")
+            .accessibilityLabel(series.isFavorite ? Copy.shared.removeFavourite : Copy.shared.addFavourite)
 
             WatchlistButton(entry: WatchlistEntry.companion.of(item: series))
 
@@ -206,14 +206,14 @@ struct SeriesView: View {
                     Button {
                         selectedSeason = season
                     } label: {
-                        Text(season.name ?? "Season")
+                        Text(season.name ?? Copy.shared.season)
                             .font(.headline)
                     }
                     #else
                     Button {
                         selectedSeason = season
                     } label: {
-                        Text(season.name ?? "Season")
+                        Text(season.name ?? Copy.shared.season)
                     }
                     .buttonStyle(
                         SeasonPillStyle(selected: season.id == selectedSeason?.id)
@@ -257,7 +257,7 @@ struct SeriesView: View {
                     // touch screen AND on the Siri Remote — the Android
                     // twin uses combinedClickable(onLongClick=) for it
                     .contextMenu {
-                        Button(episode.isWatched ? "Mark as unwatched" : "Mark as watched") {
+                        Button(episode.isWatched ? Copy.shared.markUnwatched : Copy.shared.markWatched) {
                             toggleWatched(episode)
                         }
                     }
@@ -338,7 +338,7 @@ private struct EpisodeStill: View {
             }
 
             if let minutes = episode.runtimeMinutes {
-                Text("\(minutes) min")
+                Text(Copy.shared.minutes(n: Int32(minutes.intValue)))
                     .font(.caption2.bold())
                     .foregroundStyle(.white)
                     .padding(.horizontal, 8)
@@ -367,7 +367,7 @@ private struct EpisodeMeta: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             if let index = episode.indexNumber {
-                Text("EPISODE \(index)")
+                Text(Copy.shared.episode(n: Int32(index.intValue)))
                     .font(.caption2.bold())
                     .foregroundStyle(.secondary)
             }

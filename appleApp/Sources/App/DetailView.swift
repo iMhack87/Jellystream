@@ -65,7 +65,57 @@ struct DetailView: View {
 
                     RatingsRow(ratings: item.ratings)
 
-                    if let genres = item.genres, !genres.isEmpty {
+                    let chips = item.genreIdList()
+                    if !chips.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(chips, id: \.id) { genre in
+                                    if let id = genre.id {
+                                        NavigationLink(value: BaseItem(
+                                            id: id,
+                                            name: genre.name,
+                                            type: "Genre",
+                                            collectionType: nil,
+                                            productionYear: nil,
+                                            imageTags: nil,
+                                            seriesName: nil,
+                                            seriesId: nil,
+                                            userData: nil,
+                                            overview: nil,
+                                            runTimeTicks: nil,
+                                            genres: nil,
+                                            communityRating: nil,
+                                            criticRating: nil,
+                                            officialRating: nil,
+                                            indexNumber: nil,
+                                            parentIndexNumber: nil,
+                                            backdropImageTags: nil,
+                                            parentBackdropItemId: nil,
+                                            parentBackdropImageTags: nil,
+                                            premiereDate: nil,
+                                            providerIds: nil,
+                                            people: nil,
+                                            genreItems: nil,
+                                            chapters: nil,
+                                            trickplay: nil,
+                                            primaryImageTag: nil
+                                        )) {
+                                            Text(genre.name ?? "")
+                                                .font(.caption)
+                                                .padding(.horizontal, 12)
+                                                .padding(.vertical, 6)
+                                                .background(Color.white.opacity(0.12), in: Capsule())
+                                        }
+                                        #if os(tvOS)
+                                        .buttonStyle(.borderless)
+                                        #else
+                                        .buttonStyle(.plain)
+                                        #endif
+                                    }
+                                }
+                            }
+                        }
+                    } else if let genres = item.genres, !genres.isEmpty {
                         Text(genres.joined(separator: " · "))
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -78,7 +128,7 @@ struct DetailView: View {
                     } label: {
                         let resume = item.resumePositionSeconds
                         Label(
-                            resume > 60 ? "Resume (\(Int(resume / 60)) min)" : "Play",
+                            resume > 60 ? Copy.shared.resumeMinutes(minutes: Int32(resume / 60)) : Copy.shared.play,
                             systemImage: "play.fill"
                         )
                         .font(.headline)
@@ -123,6 +173,11 @@ struct DetailView: View {
                             .foregroundStyle(.white.opacity(0.9))
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
+
+                    let cast = item.castList()
+                    if !cast.isEmpty {
+                        PersonRow(api: api, people: cast)
+                    }
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 32)
@@ -135,14 +190,14 @@ struct DetailView: View {
         // ghost text on the image; the content already shows the title
         #if !os(tvOS)
         .navigationTitle(item.name ?? "")
-        .navigationBarTitleDisplayMode(.inline)
+        .inlineNavigationTitle()
         #endif
         .task {
             if let full = try? await api.getItem(itemId: item.id) {
                 item = full
             }
         }
-        .fullScreenCover(item: $playingItem) { playing in
+        .playerCover(item: $playingItem) { playing in
             PlayerScreen(api: api, item: playing, settings: appSettings, seerr: seerr)
         }
     }
@@ -162,13 +217,13 @@ struct DetailView: View {
             .buttonStyle(.plain)
             .foregroundStyle(.white)
             #endif
-            .accessibilityLabel(item.isFavorite ? "Remove favourite" : "Add favourite")
+            .accessibilityLabel(item.isFavorite ? Copy.shared.removeFavourite : Copy.shared.addFavourite)
 
             Button {
                 toggleWatched()
             } label: {
                 Label(
-                    item.isWatched ? "Mark as unwatched" : "Mark as watched",
+                    item.isWatched ? Copy.shared.markUnwatched : Copy.shared.markWatched,
                     systemImage: item.isWatched ? "checkmark.circle.fill" : "checkmark.circle"
                 )
                 .font(.subheadline)
@@ -196,7 +251,7 @@ struct DetailView: View {
             let ok = (try? await api.setFavorite(itemId: before.id, favorite: wanted))?.boolValue ?? false
             if !ok {
                 item = before
-                notice = "Couldn't reach the server"
+                notice = Copy.shared.couldntReach
             }
         }
     }
@@ -212,7 +267,7 @@ struct DetailView: View {
             let ok = (try? await api.setWatched(itemId: before.id, watched: wanted))?.boolValue ?? false
             if !ok {
                 item = before
-                notice = "Couldn't reach the server"
+                notice = Copy.shared.couldntReach
             }
         }
     }
@@ -220,7 +275,7 @@ struct DetailView: View {
     private var metaLine: String {
         var parts: [String] = []
         if let year = item.productionYear { parts.append("\(year)") }
-        if let minutes = item.runtimeMinutes { parts.append("\(minutes) min") }
+        if let minutes = item.runtimeMinutes { parts.append(Copy.shared.minutes(n: Int32(minutes.intValue))) }
         // Ratings moved out to RatingsRow — a star, a tomatometer and a
         // certificate crammed into one grey line read as trivia
         return parts.joined(separator: "  ·  ")
@@ -246,7 +301,7 @@ private struct DownloadControl: View {
                 downloadingEnabled: allowed.map { KotlinBoolean(bool: $0) }
             )
             if availability.canDownload {
-                Button("Download") {
+                Button(Copy.shared.download) {
                     Task {
                         let container = try? await api.containerOf(item: item)
                         downloader.start(item: item, container: container)
@@ -262,10 +317,10 @@ private struct DownloadControl: View {
 
     private static func label(_ state: DownloadState) -> String {
         switch state {
-        case .queued: return "Queued for download"
-        case .downloading: return "Downloading…"
-        case .complete: return "Available offline"
-        case .failed: return "Download failed"
+        case .queued: return Copy.shared.queuedDownload
+        case .downloading: return Copy.shared.downloading
+        case .complete: return Copy.shared.offlineAvailable
+        case .failed: return Copy.shared.downloadFailed
         default: return ""
         }
     }
