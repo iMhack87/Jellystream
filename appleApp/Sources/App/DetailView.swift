@@ -190,14 +190,14 @@ struct DetailView: View {
         // ghost text on the image; the content already shows the title
         #if !os(tvOS)
         .navigationTitle(item.name ?? "")
-        .navigationBarTitleDisplayMode(.inline)
+        .inlineNavigationTitle()
         #endif
         .task {
             if let full = try? await api.getItem(itemId: item.id) {
                 item = full
             }
         }
-        .fullScreenCover(item: $playingItem) { playing in
+        .playerCover(item: $playingItem) { playing in
             PlayerScreen(api: api, item: playing, settings: appSettings, seerr: seerr)
         }
     }

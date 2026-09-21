@@ -1,6 +1,6 @@
 # Jellystream
 
-Lecteur Jellyfin Direct Play. Monorepo : `shared/` (KMP — API, modèles, moteur de décision Direct Play), `androidApp/` (Compose, mobile + Android TV), `appleApp/` (SwiftUI, iOS/iPadOS/tvOS via XcodeGen).
+Lecteur Jellyfin Direct Play. Monorepo : `shared/` (KMP — API, modèles, moteur de décision Direct Play), `androidApp/` (Compose, mobile + Android TV), `appleApp/` (SwiftUI, iOS/iPadOS/tvOS/macOS via XcodeGen).
 
 ## Maintenance de ce fichier
 
@@ -20,9 +20,10 @@ Toute session qui découvre un piège, change une commande de build ou de déplo
 cd appleApp && xcodegen generate
 xcodebuild -project Jellystream.xcodeproj -scheme Jellystream -destination 'generic/platform=iOS Simulator' build CODE_SIGNING_ALLOWED=NO   # iOS
 xcodebuild -project Jellystream.xcodeproj -scheme JellystreamTV -destination 'generic/platform=tvOS Simulator' build CODE_SIGNING_ALLOWED=NO # tvOS
+xcodebuild -project Jellystream.xcodeproj -scheme JellystreamMac -destination 'platform=macOS' build CODE_SIGNING_ALLOWED=NO             # Mac
 ```
 
-Signature Apple : équipe **B35G5Y85U9** (ZEF Computers, `contact@zefcomputers.com`). Une seule fiche App Store Connect, bundle `dev.jellystream.app`, plateformes iOS **et** tvOS. Archiver chaque cible (destination *generic iOS/tvOS device*, pas simulateur).
+Signature Apple : équipe **B35G5Y85U9** (ZEF Computers, `contact@zefcomputers.com`). Une seule fiche App Store Connect, bundle `dev.jellystream.app`, plateformes iOS, tvOS **et** macOS. Archiver chaque cible (destination *generic iOS/tvOS device*, pas simulateur).
 
 ## Pièges connus
 
@@ -83,6 +84,6 @@ Compte `contact@zefcomputers.com`, équipe **B35G5Y85U9** (ZEF Computers). Posé
 
 Play : paquet `dev.jellystream.android`, piste interne 1.0.0 (versionCode 1) envoyée. Keystore d'upload **hors git** : `androidApp/jellystream-upload.jks` + `androidApp/keystore.properties` — à sauvegarder, sans ça on ne pourra plus signer. L'API Play se pilote avec ADC (`gcloud auth application-default login` + scope `androidpublisher`) et le projet quota `project-bd51f2ff-7209-4eea-969`.
 
-Apple TestFlight : une fiche App Store Connect, bundle `dev.jellystream.app`, cases iOS + tvOS cochées. L’upload part de deux archives (scheme Jellystream et JellystreamTV) vers cette même fiche.
+Apple TestFlight : une fiche App Store Connect, bundle `dev.jellystream.app`, cases iOS + tvOS + macOS. L’upload part des schemes Jellystream, JellystreamTV et JellystreamMac vers cette même fiche.
 
 Merge sur `main` uniquement via PR approuvée par Matthieu.

@@ -43,7 +43,7 @@ jobs:
           if-no-files-found: ignore
 
   apple:
-    name: iOS + tvOS
+    name: iOS + tvOS + macOS
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -79,4 +79,11 @@ jobs:
         run: |
           xcodebuild -project Jellystream.xcodeproj -scheme JellystreamTV \
             -destination 'generic/platform=tvOS Simulator' \
+            build CODE_SIGNING_ALLOWED=NO
+
+      - name: Build macOS
+        working-directory: appleApp
+        run: |
+          xcodebuild -project Jellystream.xcodeproj -scheme JellystreamMac \
+            -destination 'platform=macOS' \
             build CODE_SIGNING_ALLOWED=NO

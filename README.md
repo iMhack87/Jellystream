@@ -20,6 +20,7 @@ Jellystream aims to play **every format your Jellyfin server can throw at it, na
 | Android TV | 🚧 In progress — same, driven by the D-pad |
 | iOS / iPadOS | 🚧 In progress — browse, search, series, profiles, settings, Direct Play (mpv), resume |
 | Apple TV (tvOS) | 🚧 In progress — same, driven by the Siri Remote |
+| macOS | 🚧 In progress — same SwiftUI app, windowed, mpv Direct Play |
 
 ## Tech stack
 
@@ -27,7 +28,7 @@ Jellystream aims to play **every format your Jellyfin server can throw at it, na
 
 - **Shared (KMP):** Jellyfin API client (Ktor), auth, library, Direct Play decision engine.
 - **Android / Android TV:** Jetpack Compose + Compose for TV, Media3 (ExoPlayer) with FFmpeg audio decoders.
-- **iOS / iPadOS / tvOS:** SwiftUI, MPVKit (mpv + FFmpeg) — the only realistic path to MKV/TrueHD/ASS on Apple platforms.
+- **iOS / iPadOS / tvOS / macOS:** SwiftUI, MPVKit (mpv + FFmpeg) — the only realistic path to MKV/TrueHD/ASS on Apple platforms.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full rationale.
 

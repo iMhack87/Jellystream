@@ -62,7 +62,7 @@ struct CatalogView: View {
         .background(Color.black)
         .navigationTitle(item.name ?? "")
         #if !os(tvOS)
-        .navigationBarTitleDisplayMode(.inline)
+        .inlineNavigationTitle()
         #endif
         .task {
             do {

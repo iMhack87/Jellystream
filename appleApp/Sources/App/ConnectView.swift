@@ -113,8 +113,8 @@ final class AppModel: ObservableObject {
     private static func makeApi(deviceId: String) -> JellyfinApi {
         JellyfinApi(
             clientName: "Jellystream",
-            clientVersion: "0.1.0",
-            deviceName: UIDevice.current.name,
+            clientVersion: JellyfinApi.companion.CLIENT_VERSION,
+            deviceName: DeviceName.current,
             deviceId: deviceId
         )
     }
@@ -497,10 +497,10 @@ struct ConnectView: View {
                     TextField("Server URL", text: $serverUrl)
                         .textContentType(.URL)
                         .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
+                        .neverAutocapitalize()
                     TextField("Username", text: $username)
                         .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
+                        .neverAutocapitalize()
                     SecureField("Password", text: $password)
                 }
 

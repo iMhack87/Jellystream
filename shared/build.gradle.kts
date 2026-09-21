@@ -20,6 +20,7 @@ kotlin {
         iosSimulatorArm64(),
         tvosArm64(),
         tvosSimulatorArm64(),
+        macosArm64(),
     ).forEach { appleTarget ->
         appleTarget.binaries.framework {
             baseName = "Shared"

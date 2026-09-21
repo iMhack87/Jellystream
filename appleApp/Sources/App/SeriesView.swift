@@ -59,7 +59,7 @@ struct SeriesView: View {
         .ignoresSafeArea(edges: .top)
         .preferredColorScheme(.dark)
         #if !os(tvOS)
-        .navigationBarTitleDisplayMode(.inline)
+        .inlineNavigationTitle()
         #endif
         .task {
             // Refetch the show itself, as the Android twin does. The item
@@ -82,7 +82,7 @@ struct SeriesView: View {
             guard let season = selectedSeason else { return }
             episodes = (try? await api.getEpisodes(seriesId: series.id, seasonId: season.id)) ?? []
         }
-        .fullScreenCover(item: $playingItem) { playing in
+        .playerCover(item: $playingItem) { playing in
             PlayerScreen(api: api, item: playing, settings: appSettings, seerr: seerr)
         }
     }

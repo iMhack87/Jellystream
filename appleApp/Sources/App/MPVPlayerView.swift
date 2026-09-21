@@ -2,6 +2,7 @@ import SwiftUI
 import Combine
 import Shared
 import Libmpv
+import QuartzCore
 
 // Minimal libmpv player: renders into a CAMetalLayer via gpu-next/Vulkan
 // (MoltenVK, shipped by MPVKit). mpv+FFmpeg is what gives Jellystream
@@ -466,6 +467,42 @@ final class PlayerModel: ObservableObject {
     }
 }
 
+#if os(macOS)
+import AppKit
+import QuartzCore
+
+struct MPVPlayerView: NSViewRepresentable {
+    @ObservedObject var model: PlayerModel
+    let forceTranscode: Bool
+
+    func makeNSView(context: Context) -> MetalHostView {
+        let view = MetalHostView()
+        model.attach(to: view.metalLayer, forceTranscode: forceTranscode)
+        return view
+    }
+
+    func updateNSView(_ nsView: MetalHostView, context: Context) {}
+
+    final class MetalHostView: NSView {
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            wantsLayer = true
+            let metal = CAMetalLayer()
+            metal.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
+            layer = metal
+        }
+
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+        var metalLayer: CAMetalLayer { layer as! CAMetalLayer }
+
+        override func layout() {
+            super.layout()
+            metalLayer.frame = bounds
+        }
+    }
+}
+#else
 struct MPVPlayerView: UIViewRepresentable {
     @ObservedObject var model: PlayerModel
     /// Read from the environment by PlayerScreen and passed down, so the
@@ -486,6 +523,7 @@ struct MPVPlayerView: UIViewRepresentable {
         var metalLayer: CAMetalLayer { layer as! CAMetalLayer }
     }
 }
+#endif
 
 /**
  The player as the rest of the app knows it — and the one thing that
@@ -761,7 +799,7 @@ private struct PlayerHost: View {
                                 .foregroundStyle(.white.opacity(0.8))
                         }
                     }
-                    #if !os(tvOS)
+                    #if os(iOS)
                     AirPlayLaunchButton(model: model)
                     #endif
                 }
@@ -1425,7 +1463,7 @@ private struct ChapterStrip: View {
     }
 }
 
-#if !os(tvOS)
+#if os(iOS)
 import AVKit
 
 /// Opens the system player on an HLS transcode so AirPlay can take the

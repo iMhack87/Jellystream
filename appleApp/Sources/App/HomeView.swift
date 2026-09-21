@@ -55,7 +55,7 @@ struct HomeView: View {
             .environment(\.downloadingAllowed, downloadingAllowed)
             .task { downloadingAllowed = try? await api.canDownload()?.boolValue }
             .preferredColorScheme(.dark)
-            .fullScreenCover(item: $playingItem) { item in
+            .playerCover(item: $playingItem) { item in
                 PlayerScreen(api: api, item: item, settings: settings, seerr: seerr)
             }
             #if !os(tvOS)
@@ -75,7 +75,7 @@ struct HomeView: View {
                     .preferredColorScheme(.dark)
                 }
             }
-            .fullScreenCover(item: $offlineItem) { offline in
+            .playerCover(item: $offlineItem) { offline in
                 if let downloader, let profile {
                     PlayerScreen(
                         api: api,
@@ -159,7 +159,7 @@ struct HomeView: View {
                         AvatarCircle(initial: session.initial, size: 28)
                     }
                 }
-                .toolbarColorScheme(.dark, for: .navigationBar)
+                .darkNavigationBar()
         }
         .sheet(isPresented: $showSettings) {
             NavigationStack {
