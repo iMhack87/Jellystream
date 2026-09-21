@@ -81,4 +81,8 @@ Compte `contact@zefcomputers.com`, équipe **B35G5Y85U9** (ZEF Computers). Posé
 
 ## Déploiement
 
-Aucun pour l'instant (pas de store, pas de CI). Merge sur `main` uniquement via PR approuvée par Matthieu.
+Play : paquet `dev.jellystream.android`, piste interne 1.0.0 (versionCode 1) envoyée. Keystore d'upload **hors git** : `androidApp/jellystream-upload.jks` + `androidApp/keystore.properties` — à sauvegarder, sans ça on ne pourra plus signer. L'API Play se pilote avec ADC (`gcloud auth application-default login` + scope `androidpublisher`) et le projet quota `project-bd51f2ff-7209-4eea-969`.
+
+Apple TestFlight : les fiches App Store Connect `dev.jellystream.app` / `dev.jellystream.tv` doivent exister avant l'upload.
+
+Merge sur `main` uniquement via PR approuvée par Matthieu.
