@@ -104,6 +104,7 @@ struct SearchView: View {
             .padding(.bottom, 40)
         }
         .navigationTitle("Search")
+        .cinemaChrome()
         .searchable(text: $query)
         .task(id: searchKey) { await run() }
     }

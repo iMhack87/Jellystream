@@ -266,6 +266,7 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
+        .cinemaChrome()
         .alert("Jellyseerr server", isPresented: $editingServer) {
             TextField("seerr.example.com", text: $serverDraft)
             Button("Save") {

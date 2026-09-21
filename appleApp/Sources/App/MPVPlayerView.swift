@@ -570,6 +570,9 @@ struct PlayerScreen: View {
             onPlayNext: { item = $0 }
         )
         .id(item.id)
+        #if os(macOS)
+        .frame(minWidth: 960, minHeight: 540)
+        #endif
     }
 }
 

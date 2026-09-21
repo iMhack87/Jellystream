@@ -57,6 +57,7 @@ struct RequestsView: View {
             }
         }
         .navigationTitle("Requests")
+        .cinemaChrome()
         #if !os(tvOS)
         .searchable(text: $query, prompt: "Search for something to request")
         #endif

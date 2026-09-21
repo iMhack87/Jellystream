@@ -5,6 +5,13 @@ import AppKit
 import UIKit
 #endif
 
+enum Cinema {
+    static let background = Color.black
+    static let field = Color.white.opacity(0.10)
+    static let stroke = Color.white.opacity(0.18)
+    static let accent = Color(red: 0.90, green: 0.58, blue: 0.32)
+}
+
 /// The name Jellyfin shows in the dashboard for this install.
 enum DeviceName {
     static var current: String {
@@ -56,5 +63,18 @@ extension View {
         #else
         self
         #endif
+    }
+
+    /// Dark cinema chrome: Form/List on macOS otherwise become the light
+    /// System Settings layout with labels in a side column.
+    func cinemaChrome() -> some View {
+        self
+            .preferredColorScheme(.dark)
+            .tint(Cinema.accent)
+            .background(Cinema.background)
+            #if os(macOS)
+            .scrollContentBackground(.hidden)
+            .formStyle(.grouped)
+            #endif
     }
 }

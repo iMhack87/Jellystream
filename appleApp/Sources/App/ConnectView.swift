@@ -405,6 +405,8 @@ struct RootView: View {
                 ProfilePickerView(model: model)
             }
         }
+        .cinemaChrome()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         // The notice has to show during playback, and the player is a
         // fullScreenCover — a UIKit modal above this whole hierarchy. Its
         // own window is the only placement that survives that.
@@ -492,85 +494,187 @@ struct ConnectView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Server") {
-                    TextField("Server URL", text: $serverUrl)
-                        .textContentType(.URL)
-                        .autocorrectionDisabled()
-                        .neverAutocapitalize()
-                    TextField("Username", text: $username)
-                        .autocorrectionDisabled()
-                        .neverAutocapitalize()
-                    SecureField("Password", text: $password)
-                }
-
-                Section {
-                    Button("Connect") {
-                        model.login(
-                            serverUrl: serverUrl,
-                            username: username,
-                            password: password
-                        )
-                    }
-                    .disabled(model.isLoading || serverUrl.isEmpty)
-
-                    // No on-screen keyboard needed — ideal on Apple TV
-                    Button("Use Quick Connect") {
-                        model.startQuickConnect(serverUrl: serverUrl)
-                    }
-                    .disabled(model.isLoading || serverUrl.isEmpty)
-
-                    // Adding from the picker must always offer a way back
-                    if model.addingProfile {
-                        Button("Back to profiles", role: .cancel) {
-                            model.cancelAddProfile()
-                        }
-                    }
-                }
-
-                if let code = model.quickConnectCode {
-                    Section("Quick Connect") {
-                        Text(code)
-                            .font(.system(.largeTitle, design: .rounded).bold())
-                        Text("Enter this code in Jellyfin on your phone or browser")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                switch model.status {
-                case .idle:
-                    EmptyView()
-                case .loading:
-                    ProgressView()
-                case .failure(let message):
-                    Text(message).foregroundStyle(.red)
-                }
-            }
-            .navigationTitle(model.addingProfile ? "Add Profile" : "Jellystream")
-            // Shown BEFORE any credential leaves the device: the server
-            // only answered over plain http for a scheme-less input
-            .alert(
-                "Unencrypted connection",
-                isPresented: Binding(
-                    get: { model.pendingInsecure != nil },
-                    set: { if !$0 { model.cancelInsecureConnection() } }
-                )
-            ) {
-                Button("Connect Anyway", role: .destructive) {
-                    model.confirmInsecureConnection()
-                }
-                Button("Cancel", role: .cancel) {
-                    model.cancelInsecureConnection()
-                }
-            } message: {
-                Text("This server is only reachable over plain HTTP. Your password and streams would travel unencrypted on the network.")
-            }
-            #if os(tvOS)
-            .onExitCommand {
-                if model.addingProfile { model.cancelAddProfile() }
-            }
+            #if os(macOS)
+            macConnect
+            #else
+            formConnect
             #endif
+        }
+        .cinemaChrome()
+        .alert(
+            "Unencrypted connection",
+            isPresented: Binding(
+                get: { model.pendingInsecure != nil },
+                set: { if !$0 { model.cancelInsecureConnection() } }
+            )
+        ) {
+            Button("Connect Anyway", role: .destructive) {
+                model.confirmInsecureConnection()
+            }
+            Button("Cancel", role: .cancel) {
+                model.cancelInsecureConnection()
+            }
+        } message: {
+            Text("This server is only reachable over plain HTTP. Your password and streams would travel unencrypted on the network.")
+        }
+        #if os(tvOS)
+        .onExitCommand {
+            if model.addingProfile { model.cancelAddProfile() }
+        }
+        #endif
+    }
+
+    #if os(macOS)
+    private var macConnect: some View {
+        VStack(spacing: 28) {
+            Spacer(minLength: 24)
+            Text(model.addingProfile ? "Add Profile" : "Jellystream")
+                .font(.system(size: 34, weight: .bold))
+                .foregroundStyle(.white)
+
+            VStack(spacing: 12) {
+                macField("Server URL", text: $serverUrl, secure: false)
+                macField("Username", text: $username, secure: false)
+                macField("Password", text: $password, secure: true)
+            }
+            .frame(maxWidth: 420)
+
+            VStack(spacing: 10) {
+                Button {
+                    model.login(serverUrl: serverUrl, username: username, password: password)
+                } label: {
+                    Text("Connect")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.black)
+                .background(Cinema.accent, in: Capsule())
+                .disabled(model.isLoading || serverUrl.isEmpty)
+                .opacity(serverUrl.isEmpty ? 0.4 : 1)
+
+                Button("Use Quick Connect") {
+                    model.startQuickConnect(serverUrl: serverUrl)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white.opacity(0.85))
+                .disabled(model.isLoading || serverUrl.isEmpty)
+
+                if model.addingProfile {
+                    Button("Back to profiles") { model.cancelAddProfile() }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: 420)
+
+            if let code = model.quickConnectCode {
+                VStack(spacing: 8) {
+                    Text(code)
+                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                    Text("Enter this code in Jellyfin on your phone or browser")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            statusView
+            Spacer(minLength: 24)
+        }
+        .padding(40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Cinema.background)
+    }
+
+    private func macField(_ title: String, text: Binding<String>, secure: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Group {
+                if secure {
+                    SecureField("", text: text)
+                } else {
+                    TextField("", text: text)
+                        .neverAutocapitalize()
+                        .autocorrectionDisabled()
+                }
+            }
+            .textFieldStyle(.plain)
+            .foregroundStyle(.white)
+            .padding(12)
+            .background(Cinema.field, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Cinema.stroke, lineWidth: 1)
+            )
+        }
+    }
+    #endif
+
+    private var formConnect: some View {
+        Form {
+            Section("Server") {
+                TextField("Server URL", text: $serverUrl)
+                    .textContentType(.URL)
+                    .autocorrectionDisabled()
+                    .neverAutocapitalize()
+                TextField("Username", text: $username)
+                    .autocorrectionDisabled()
+                    .neverAutocapitalize()
+                SecureField("Password", text: $password)
+            }
+
+            Section {
+                Button("Connect") {
+                    model.login(
+                        serverUrl: serverUrl,
+                        username: username,
+                        password: password
+                    )
+                }
+                .disabled(model.isLoading || serverUrl.isEmpty)
+
+                // No on-screen keyboard needed — ideal on Apple TV
+                Button("Use Quick Connect") {
+                    model.startQuickConnect(serverUrl: serverUrl)
+                }
+                .disabled(model.isLoading || serverUrl.isEmpty)
+
+                // Adding from the picker must always offer a way back
+                if model.addingProfile {
+                    Button("Back to profiles", role: .cancel) {
+                        model.cancelAddProfile()
+                    }
+                }
+            }
+
+            if let code = model.quickConnectCode {
+                Section("Quick Connect") {
+                    Text(code)
+                        .font(.system(.largeTitle, design: .rounded).bold())
+                    Text("Enter this code in Jellyfin on your phone or browser")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            statusView
+        }
+        .navigationTitle(model.addingProfile ? "Add Profile" : "Jellystream")
+    }
+
+    @ViewBuilder
+    private var statusView: some View {
+        switch model.status {
+        case .idle:
+            EmptyView()
+        case .loading:
+            ProgressView()
+        case .failure(let message):
+            Text(message).foregroundStyle(.red)
         }
     }
 }

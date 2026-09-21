@@ -86,6 +86,7 @@ struct SeasonPickerView: View {
             }
         }
         .navigationTitle(showName)
+        .cinemaChrome()
         .task {
             details = try? await seerr.tvDetails(tmdbId: tmdbId)
             loading = false
