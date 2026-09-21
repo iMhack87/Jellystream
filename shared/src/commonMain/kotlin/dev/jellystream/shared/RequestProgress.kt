@@ -49,7 +49,7 @@ data class RequestProgress(
         get() = listOfNotNull(
             percentLabel,
             remainingLabel.takeIf { !isFinishing },
-            "Finishing up".takeIf { isFinishing },
+            Copy.finishingUp.takeIf { isFinishing },
         ).joinToString(" · ")
 
     companion object {
@@ -120,24 +120,25 @@ data class RequestProgress(
          * left", never "0 min left", which looks like a stuck download.
          */
         internal fun formatRemaining(seconds: Long): String {
-            if (seconds <= 0L) return "Any moment now"
-            if (seconds < 60L) return "Under a minute left"
+            if (seconds <= 0L) return Copy.anyMomentNow
+            if (seconds < 60L) return Copy.underAMinuteLeft
 
             // Round up to whole minutes ONCE, then split. Rounding each
             // unit on its own is how "1 h 60 min left" gets shipped.
             val totalMinutes = (seconds + 59) / 60
-            if (totalMinutes < 60) return "$totalMinutes min left"
+            if (totalMinutes < 60) return Copy.remainingMinutes(totalMinutes)
 
             val totalHours = totalMinutes / 60
             val minutes = totalMinutes % 60
             if (totalHours < 24) {
-                return if (minutes == 0L) "$totalHours h left" else "$totalHours h $minutes min left"
+                return if (minutes == 0L) Copy.remainingHours(totalHours)
+                else Copy.remainingHoursMinutes(totalHours, minutes)
             }
 
             // Past a day the estimate is guesswork anyway — round to the
             // nearest day so 25 hours does not read as "2 days".
             val days = (totalHours + 12) / 24
-            return if (days <= 1L) "About a day left" else "About $days days left"
+            return if (days <= 1L) Copy.remainingAboutADay else Copy.remainingDays(days)
         }
     }
 }

@@ -134,7 +134,7 @@ class UnifiedSearchMergeTest {
         val hits = UnifiedSearch.merge(listOf(film("Dune", 2021)), emptyList())
 
         assertNull(hits[0].requestState)
-        assertEquals("Film · 2021 · on the server", hits[0].subtitle)
+        assertEquals("${Copy.film} · 2021 · ${Copy.onTheServerLower}", hits[0].subtitle)
     }
 
     @Test
@@ -145,7 +145,7 @@ class UnifiedSearchMergeTest {
         )
 
         assertEquals(RequestState.PROCESSING, hits[0].requestState)
-        assertEquals("Series · 2011", hits[0].subtitle)
+        assertEquals("${Copy.series} · 2011", hits[0].subtitle)
     }
 }
 
@@ -287,7 +287,7 @@ class ArrivalsTest {
 
         val landed = Arrivals.landed(listOf(request(1, 5, "Severance")), seen, firstLook = false)
         assertEquals(1, landed.size)
-        assertEquals("Severance has arrived", landed.first().message)
+        assertEquals(Copy.arrived("Severance", null), landed.first().message)
 
         // And not a second time
         val after = Arrivals.seenAfterShowing(landed.first(), seen)
@@ -302,7 +302,7 @@ class ArrivalsTest {
             firstLook = false,
         )
 
-        assertEquals("Severance season 2 has arrived", landed.first().message)
+        assertEquals(Copy.arrived("Severance", Copy.seasonNumber(2)), landed.first().message)
     }
 
     @Test

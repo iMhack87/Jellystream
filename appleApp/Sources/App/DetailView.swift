@@ -128,7 +128,7 @@ struct DetailView: View {
                     } label: {
                         let resume = item.resumePositionSeconds
                         Label(
-                            resume > 60 ? "Resume (\(Int(resume / 60)) min)" : "Play",
+                            resume > 60 ? Copy.shared.resumeMinutes(minutes: Int32(resume / 60)) : Copy.shared.play,
                             systemImage: "play.fill"
                         )
                         .font(.headline)
@@ -217,13 +217,13 @@ struct DetailView: View {
             .buttonStyle(.plain)
             .foregroundStyle(.white)
             #endif
-            .accessibilityLabel(item.isFavorite ? "Remove favourite" : "Add favourite")
+            .accessibilityLabel(item.isFavorite ? Copy.shared.removeFavourite : Copy.shared.addFavourite)
 
             Button {
                 toggleWatched()
             } label: {
                 Label(
-                    item.isWatched ? "Mark as unwatched" : "Mark as watched",
+                    item.isWatched ? Copy.shared.markUnwatched : Copy.shared.markWatched,
                     systemImage: item.isWatched ? "checkmark.circle.fill" : "checkmark.circle"
                 )
                 .font(.subheadline)
@@ -251,7 +251,7 @@ struct DetailView: View {
             let ok = (try? await api.setFavorite(itemId: before.id, favorite: wanted))?.boolValue ?? false
             if !ok {
                 item = before
-                notice = "Couldn't reach the server"
+                notice = Copy.shared.couldntReach
             }
         }
     }
@@ -267,7 +267,7 @@ struct DetailView: View {
             let ok = (try? await api.setWatched(itemId: before.id, watched: wanted))?.boolValue ?? false
             if !ok {
                 item = before
-                notice = "Couldn't reach the server"
+                notice = Copy.shared.couldntReach
             }
         }
     }
@@ -275,7 +275,7 @@ struct DetailView: View {
     private var metaLine: String {
         var parts: [String] = []
         if let year = item.productionYear { parts.append("\(year)") }
-        if let minutes = item.runtimeMinutes { parts.append("\(minutes) min") }
+        if let minutes = item.runtimeMinutes { parts.append(Copy.shared.minutes(n: Int32(minutes.intValue))) }
         // Ratings moved out to RatingsRow — a star, a tomatometer and a
         // certificate crammed into one grey line read as trivia
         return parts.joined(separator: "  ·  ")
@@ -301,7 +301,7 @@ private struct DownloadControl: View {
                 downloadingEnabled: allowed.map { KotlinBoolean(bool: $0) }
             )
             if availability.canDownload {
-                Button("Download") {
+                Button(Copy.shared.download) {
                     Task {
                         let container = try? await api.containerOf(item: item)
                         downloader.start(item: item, container: container)
@@ -317,10 +317,10 @@ private struct DownloadControl: View {
 
     private static func label(_ state: DownloadState) -> String {
         switch state {
-        case .queued: return "Queued for download"
-        case .downloading: return "Downloading…"
-        case .complete: return "Available offline"
-        case .failed: return "Download failed"
+        case .queued: return Copy.shared.queuedDownload
+        case .downloading: return Copy.shared.downloading
+        case .complete: return Copy.shared.offlineAvailable
+        case .failed: return Copy.shared.downloadFailed
         default: return ""
         }
     }

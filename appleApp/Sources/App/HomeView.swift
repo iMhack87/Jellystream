@@ -70,7 +70,7 @@ struct HomeView: View {
                                 offlineItem = item
                             }
                         )
-                        .toolbar { Button("Done") { showDownloads = false } }
+                        .toolbar { Button(Copy.shared.done) { showDownloads = false } }
                     }
                     .preferredColorScheme(.dark)
                 }
@@ -119,14 +119,14 @@ struct HomeView: View {
                 homeScroll
                     .itemDestination(api: api, seerr: seerr)
             }
-            .tabItem { Label("Home", systemImage: "house") }
+            .tabItem { Label(Copy.shared.home, systemImage: "house") }
             .tag(Tab.home)
 
             NavigationStack {
                 SearchView(api: api, seerr: seerr)
                     .itemDestination(api: api, seerr: seerr)
             }
-            .tabItem { Label("Search", systemImage: "magnifyingglass") }
+            .tabItem { Label(Copy.shared.search, systemImage: "magnifyingglass") }
             .tag(Tab.search)
 
             NavigationStack {
@@ -165,7 +165,7 @@ struct HomeView: View {
             NavigationStack {
                 settingsScreen
                     .toolbar {
-                        Button("Done") { showSettings = false }
+                        Button(Copy.shared.done) { showSettings = false }
                     }
             }
             .preferredColorScheme(.dark)
@@ -197,16 +197,12 @@ struct HomeView: View {
                 // NSURLError dump and no way to them is the worst possible
                 // screen to meet on a train
                 VStack(spacing: 14) {
-                    Text("Can't reach the server.").font(.headline)
+                    Text(Copy.shared.cantReachServer).font(.headline)
                     if playableDownloads > 0 {
-                        Text(
-                            "\(playableDownloads) downloaded "
-                            + (playableDownloads == 1 ? "title is" : "titles are")
-                            + " still on this device."
-                        )
+                        Text(Copy.shared.downloadsStillOnDevice(n: Int32(playableDownloads)))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                        Button("Go to downloads") { showDownloads = true }
+                        Button(Copy.shared.goToDownloads) { showDownloads = true }
                             .buttonStyle(.borderedProminent)
                     } else {
                         Text(error).font(.caption).foregroundStyle(.secondary)
@@ -292,22 +288,22 @@ struct HomeView: View {
         do {
             var result: [LibrarySection] = []
             if let resume = try? await api.getResumeItems(limit: 12), !resume.isEmpty {
-                result.append(LibrarySection(title: "Continue Watching", key: "resume", items: resume))
+                result.append(LibrarySection(title: Copy.shared.continueWatching, key: "resume", items: resume))
             }
             if let nextUp = try? await api.getNextUp(limit: 12), !nextUp.isEmpty {
-                result.append(LibrarySection(title: "Next Up", key: "nextup", items: nextUp))
+                result.append(LibrarySection(title: Copy.shared.nextUp, key: "nextup", items: nextUp))
             }
             if let collections = try? await api.getCollections(limit: 24), !collections.isEmpty {
-                result.append(LibrarySection(title: "Collections", key: "collections", items: collections))
+                result.append(LibrarySection(title: Copy.shared.collections, key: "collections", items: collections))
             }
             if let genres = try? await api.getGenres(parentId: "", limit: 24), !genres.isEmpty {
-                result.append(LibrarySection(title: "Genres", key: "genres", items: genres))
+                result.append(LibrarySection(title: Copy.shared.genres, key: "genres", items: genres))
             }
             let views = settings.visibleLibraries(views: try await api.getUserViews())
             for view in views {
                 // One failing view must not blank the whole home screen
                 let latest = (try? await api.getLatestItems(viewId: view.id, limit: 12)) ?? []
-                result.append(LibrarySection(title: view.name ?? "Library", key: view.id, items: latest))
+                result.append(LibrarySection(title: view.name ?? Copy.shared.library, key: view.id, items: latest))
             }
             sections = result
         } catch {
@@ -425,7 +421,7 @@ private struct HeroSection: View {
                     if item.isPlayable {
                         Button(action: onPlay) {
                             Label(
-                                item.resumePositionSeconds > 60 ? "Resume" : "Play",
+                                item.resumePositionSeconds > 60 ? Copy.shared.resume : Copy.shared.play,
                                 systemImage: "play.fill"
                             )
                             .font(.headline)
@@ -442,7 +438,7 @@ private struct HeroSection: View {
                     }
 
                     NavigationLink(value: item) {
-                        Text("Details")
+                        Text(Copy.shared.details)
                             .font(.headline)
                             #if !os(tvOS)
                             .foregroundStyle(.white)
@@ -469,7 +465,7 @@ private struct HeroSection: View {
             parts.append("\(item.seriesName ?? "") \(label)".trimmingCharacters(in: .whitespaces))
         }
         if let year = item.productionYear { parts.append("\(year)") }
-        if let minutes = item.runtimeMinutes { parts.append("\(minutes) min") }
+        if let minutes = item.runtimeMinutes { parts.append(Copy.shared.minutes(n: Int32(minutes.intValue))) }
         return parts.joined(separator: "  ·  ")
     }
 }
@@ -682,7 +678,7 @@ private struct RequestedRow: View {
         // empty for ever because it never got to ask.
         VStack(alignment: .leading, spacing: 0) {
             if !rows.isEmpty {
-                Shelf(title: "Requested & on the way") {
+                Shelf(title: Copy.shared.requestedOnTheWay) {
                     ForEach(rows, id: \.request.id) { row in
                         RequestedCard(row: row)
                     }
@@ -791,7 +787,7 @@ private struct WatchlistRow: View {
         // Never a Group: see RequestedRow — an EmptyView carries no task
         VStack(alignment: .leading, spacing: 0) {
             if !cards.isEmpty {
-                Shelf(title: "Watchlist") {
+                Shelf(title: Copy.shared.watchlist) {
                     ForEach(cards) { card in
                         WatchlistCardView(api: api, card: card)
                     }
@@ -926,7 +922,7 @@ private struct FavouritesRow: View {
                 LibraryRow(
                     api: api,
                     section: LibrarySection(
-                        title: "Favourites",
+                        title: Copy.shared.favourites,
                         key: "favourites",
                         items: items
                     )

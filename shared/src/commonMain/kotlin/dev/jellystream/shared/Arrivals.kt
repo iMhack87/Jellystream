@@ -13,11 +13,7 @@ data class Arrival(
 ) {
     /** "Severance season 2 has arrived" */
     val message: String
-        get() = buildString {
-            append(title)
-            seasonsLabel?.let { append(" ").append(it.lowercase()) }
-            append(" has arrived")
-        }
+        get() = Copy.arrived(title, seasonsLabel)
 }
 
 /**

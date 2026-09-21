@@ -23,7 +23,7 @@ class PlaybackExtrasTest {
             frameRate = 23.976,
         )
         val lines = stats.lines()
-        assertEquals("Direct Play", lines.first())
+        assertEquals(Copy.directPlay, lines.first())
         assertTrue(lines.any { it.contains("HEVC") && it.contains("3840×2160") && it.contains("HDR10") })
         assertTrue(lines.any { it.contains("fps") && it.contains("Mbps") })
         assertTrue(lines.any { it.contains("TRUEHD") && it.contains("7.1") && it.contains("fra") })

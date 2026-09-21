@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import dev.jellystream.shared.ChapterInfo
+import dev.jellystream.shared.Copy
 import dev.jellystream.shared.JellyfinApi
 import dev.jellystream.shared.PlaybackStats
 import dev.jellystream.shared.TrickplayInfo
@@ -71,8 +72,8 @@ fun ChapterStrip(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text("Chapters", color = Color.White)
-            TextButton(onClick = onClose) { Text("Close") }
+            Text(Copy.chapters, color = Color.White)
+            TextButton(onClick = onClose) { Text(Copy.close) }
         }
         Row(
             modifier = Modifier
@@ -102,7 +103,7 @@ fun ChapterStrip(
                             .background(CinemaColors.SurfaceVariant),
                     )
                     Text(
-                        chapter.name ?: "Chapter ${index + 1}",
+                        chapter.name ?: Copy.chapter(index + 1),
                         color = Color.White,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(top = 6.dp),
@@ -131,7 +132,7 @@ fun PlayerToolRow(
                 .clip(RoundedCornerShape(20.dp))
                 .background(Color.Black.copy(alpha = 0.45f)),
         ) {
-            Text("Info", color = Color.White)
+            Text(Copy.info, color = Color.White)
         }
         if (onChapters != null) {
             TextButton(
@@ -140,7 +141,7 @@ fun PlayerToolRow(
                     .clip(RoundedCornerShape(20.dp))
                     .background(Color.Black.copy(alpha = 0.45f)),
             ) {
-                Text("Chapters", color = Color.White)
+                Text(Copy.chapters, color = Color.White)
             }
         }
         if (showCast) {

@@ -843,7 +843,7 @@ private struct PlayerHost: View {
                         Button {
                             model.skipCurrentSegment()
                         } label: {
-                            Text(segment.isOutro ? "Skip Credits" : "Skip Intro")
+                            Text(segment.isOutro ? Copy.shared.skipCredits : Copy.shared.skipIntro)
                                 .font(.headline)
                                 #if !os(tvOS)
                                 .padding(.horizontal, 22)
@@ -955,19 +955,19 @@ private struct PlayerHost: View {
                 if let season {
                     Text(
                         offerSent
-                            ? "Season \(season.seasonNumber) requested — it'll appear once it downloads."
+                            ? Copy.shared.seasonRequestedLanding(n: season.seasonNumber)
                             : season.title
                     )
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.75))
                 }
                 if let countdown {
-                    Text("Playing in \(countdown)s")
+                    Text(Copy.shared.playingIn(seconds: Int32(countdown)))
                         .font(.subheadline.monospacedDigit())
                         .foregroundStyle(.white.opacity(0.75))
                 }
             } else if offerSent {
-                Text("Requested — it'll appear once it downloads.")
+                Text(Copy.shared.requestedLanding)
                     .font(.headline)
                     .foregroundStyle(.white)
             } else if let season {
@@ -1070,7 +1070,7 @@ private struct PlayerHost: View {
                 }
 
                 if !season.alreadyRequested {
-                    offerButton("Not now", isPrimary: false, focus: .secondary) { dismissOffer() }
+                    offerButton(Copy.shared.notNow, isPrimary: false, focus: .secondary) { dismissOffer() }
                 }
             }
             .padding(.top, 4)
@@ -1080,7 +1080,7 @@ private struct PlayerHost: View {
     /// The up-next card's actions, laid out by the caller.
     @ViewBuilder
     private func upNextActions(next: NextEpisodeOffer, season: NextSeasonOffer?) -> some View {
-        offerButton("Play now", isPrimary: true, focus: .primary) { playNext(next) }
+        offerButton(Copy.shared.playNow, isPrimary: true, focus: .primary) { playNext(next) }
 
         // Pressing it again is harmless — Jellyseerr answers "already
         // requested", which reads the same to the viewer. That is why the
@@ -1089,7 +1089,7 @@ private struct PlayerHost: View {
         // mid-request hands the remote to whatever happens to be next.
         if let season, !season.alreadyRequested {
             offerButton(
-                offerSent ? "Requested" : "Request season \(season.seasonNumber)",
+                offerSent ? Copy.shared.requestedShort : Copy.shared.requestSeason(n: season.seasonNumber),
                 isPrimary: false,
                 focus: .secondary
             ) {
@@ -1097,12 +1097,12 @@ private struct PlayerHost: View {
             }
         }
 
-        offerButton("Not now", isPrimary: false, focus: .tertiary) { dismissOffer() }
+        offerButton(Copy.shared.notNow, isPrimary: false, focus: .tertiary) { dismissOffer() }
     }
 
     private func primaryTitle(for offer: NextSeasonOffer) -> String {
-        if offer.alreadyRequested { return "OK" }
-        return "Request season \(offer.seasonNumber)"
+        if offer.alreadyRequested { return Copy.shared.ok }
+        return Copy.shared.requestSeason(n: offer.seasonNumber)
     }
 
     // tvOS buttons stay unstyled so the system focus ring is the affordance;
@@ -1179,11 +1179,11 @@ private struct PlayerHost: View {
                     }
                 }
             case is RequestOutcome.NotSignedIn:
-                offerNotice = "Sign in to Jellyseerr again in Settings"
+                offerNotice = Copy.shared.signInSeerrAgain
             case let failure as RequestOutcome.Failed:
                 offerNotice = failure.message
             default:
-                offerNotice = "Could not reach Jellyseerr"
+                offerNotice = Copy.shared.couldNotReachSeerr
             }
         }
     }
@@ -1240,9 +1240,9 @@ private struct PlayerHost: View {
                         model.selectSubtitleTrack(id: nil)
                     } label: {
                         if !model.subtitleTracks.contains(where: \.selected) {
-                            Label("Off", systemImage: "checkmark")
+                            Label(Copy.shared.off, systemImage: "checkmark")
                         } else {
-                            Text("Off")
+                            Text(Copy.shared.off)
                         }
                     }
                     ForEach(model.subtitleTracks) { track in
@@ -1260,22 +1260,22 @@ private struct PlayerHost: View {
                     // Timing lives with the track it applies to, and only
                     // once one is actually on
                     if model.subtitleTracks.contains(where: \.selected) {
-                        Section("Sync \(Self.delayLabel(model.subtitleDelay))") {
+                        Section("\(Copy.shared.sync) \(Self.delayLabel(model.subtitleDelay))") {
                             Button {
                                 model.nudgeSubtitleDelay(by: -PlayerModel.subtitleDelayStep)
                             } label: {
-                                Label("Earlier", systemImage: "gobackward")
+                                Label(Copy.shared.earlier, systemImage: "gobackward")
                             }
                             Button {
                                 model.nudgeSubtitleDelay(by: PlayerModel.subtitleDelayStep)
                             } label: {
-                                Label("Later", systemImage: "goforward")
+                                Label(Copy.shared.later, systemImage: "goforward")
                             }
                             if model.subtitleDelay != 0 {
                                 Button {
                                     model.resetSubtitleDelay()
                                 } label: {
-                                    Label("Reset", systemImage: "arrow.counterclockwise")
+                                    Label(Copy.shared.reset, systemImage: "arrow.counterclockwise")
                                 }
                             }
                         }
@@ -1317,13 +1317,13 @@ private struct TrackPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             HStack(spacing: 16) {
-                Button("Info", action: onInfo)
+                Button(Copy.shared.info, action: onInfo)
                 if let onChapters {
-                    Button("Chapters", action: onChapters)
+                    Button(Copy.shared.chapters, action: onChapters)
                 }
             }
             if model.audioTracks.count > 1 {
-                Text("Audio").font(.headline)
+                Text(Copy.shared.audio).font(.headline)
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 16) {
                         ForEach(model.audioTracks) { track in
@@ -1336,10 +1336,10 @@ private struct TrackPanel: View {
                 }
             }
             if !model.subtitleTracks.isEmpty {
-                Text("Subtitles").font(.headline)
+                Text(Copy.shared.subtitles).font(.headline)
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 16) {
-                        Button("Off") {
+                        Button(Copy.shared.off) {
                             model.selectSubtitleTrack(id: nil)
                         }
                         .foregroundStyle(
@@ -1379,7 +1379,7 @@ private struct SubtitleDelayRow: View {
 
     var body: some View {
         HStack(spacing: 16) {
-            Text("Sync").font(.headline)
+            Text(Copy.shared.sync).font(.headline)
             Button("−\(Self.stepLabel)") {
                 model.nudgeSubtitleDelay(by: -PlayerModel.subtitleDelayStep)
             }
@@ -1390,7 +1390,7 @@ private struct SubtitleDelayRow: View {
                 model.nudgeSubtitleDelay(by: PlayerModel.subtitleDelayStep)
             }
             if model.subtitleDelay != 0 {
-                Button("Reset") { model.resetSubtitleDelay() }
+                Button(Copy.shared.reset) { model.resetSubtitleDelay() }
             }
         }
     }
@@ -1416,9 +1416,9 @@ private struct ChapterStrip: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Chapters").font(.headline).foregroundStyle(.white)
+                Text(Copy.shared.chapters).font(.headline).foregroundStyle(.white)
                 Spacer()
-                Button("Close", action: onClose)
+                Button(Copy.shared.close, action: onClose)
             }
             .padding(.horizontal, 20)
             ScrollView(.horizontal, showsIndicators: false) {

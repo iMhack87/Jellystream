@@ -68,6 +68,7 @@ import dev.jellystream.shared.CueTiming
 import dev.jellystream.shared.SubtitleCue
 import dev.jellystream.shared.DownloadedItem
 import dev.jellystream.shared.BaseItem
+import dev.jellystream.shared.Copy
 import dev.jellystream.shared.JellyfinApi
 import dev.jellystream.shared.JellyseerrApi
 import dev.jellystream.shared.MediaSegment
@@ -171,7 +172,7 @@ fun OfflinePlayerScreen(
         FloatingNavButton(
             onClick = onClose,
             icon = Icons.Default.Close,
-            contentDescription = "Close player",
+            contentDescription = Copy.closePlayer,
             modifier = Modifier.align(Alignment.TopStart),
         )
     }
@@ -263,8 +264,8 @@ fun PlayerScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text("This item could not be played", color = Color.White)
-                Button(onClick = onClose) { Text("Close") }
+                Text(Copy.couldNotPlay, color = Color.White)
+                Button(onClick = onClose) { Text(Copy.close) }
             }
         } else if (currentPlan == null) {
             CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
@@ -303,7 +304,7 @@ fun PlayerScreen(
         FloatingNavButton(
             onClick = onClose,
             icon = Icons.Default.Close,
-            contentDescription = "Close player",
+            contentDescription = Copy.closePlayer,
             modifier = Modifier.align(Alignment.TopStart),
         )
         // Same Box as the close button: PlayerView swallows taps inside
@@ -420,7 +421,7 @@ private fun PlayerSurface(
                     MediaItem.SubtitleConfiguration.Builder(android.net.Uri.parse(sub.url))
                         .setMimeType(mime)
                         .setLanguage(sub.language)
-                        .setLabel(sub.title ?: sub.language ?: "External")
+                        .setLabel(sub.title ?: sub.language ?: Copy.external)
                         .build()
                 }
                 val mediaItem = MediaItem.Builder()
@@ -634,7 +635,7 @@ private fun PlayerSurface(
                 .padding(horizontal = 28.dp, vertical = 56.dp),
         ) {
             SkipSegmentButton(
-                label = if (shownSegment?.isOutro == true) "Skip Credits" else "Skip Intro",
+                label = if (shownSegment?.isOutro == true) Copy.skipCredits else Copy.skipIntro,
                 onClick = {
                     val segment = activeSegment ?: return@SkipSegmentButton
                     activeSegment = null
@@ -719,7 +720,7 @@ internal fun EndOfEpisodeCard(
                     requested = true
                 }
                 is RequestOutcome.NotSignedIn ->
-                    message = "Sign in to Jellyseerr again in Settings"
+                    message = Copy.signInSeerrAgain
                 is RequestOutcome.Failed -> message = outcome.message
             }
         }
@@ -766,7 +767,7 @@ internal fun EndOfEpisodeCard(
                     offer?.let { season ->
                         Text(
                             if (requested) {
-                                "Season ${season.seasonNumber} requested — it'll appear once it downloads."
+                                Copy.seasonRequestedLanding(season.seasonNumber)
                             } else {
                                 season.title
                             },
@@ -776,14 +777,14 @@ internal fun EndOfEpisodeCard(
                     }
                     if (countingDown) {
                         Text(
-                            "Playing in ${secondsLeft}s",
+                            Copy.playingIn(secondsLeft),
                             style = MaterialTheme.typography.bodyMedium,
                             color = CinemaColors.TextSecondary,
                         )
                     }
                 }
                 requested -> Text(
-                    "Requested — it'll appear once it downloads.",
+                    Copy.requestedLanding,
                     style = MaterialTheme.typography.titleMedium,
                     color = CinemaColors.TextPrimary,
                 )
@@ -818,7 +819,7 @@ internal fun EndOfEpisodeCard(
                 when {
                     nextEpisode != null -> {
                         PlayerCardButton(
-                            label = "Play now",
+                            label = Copy.playNow,
                             isPrimary = true,
                             grabsFocus = true,
                             onClick = { onPlayNext(nextEpisode.episode) },
@@ -833,9 +834,9 @@ internal fun EndOfEpisodeCard(
                         if (offer != null && !offer.alreadyRequested) {
                             PlayerCardButton(
                                 label = if (requested) {
-                                    "Requested"
+                                    Copy.requestedShort
                                 } else {
-                                    "Request season ${offer.seasonNumber}"
+                                    Copy.requestSeason(offer.seasonNumber)
                                 },
                                 isPrimary = false,
                                 grabsFocus = false,
@@ -843,7 +844,7 @@ internal fun EndOfEpisodeCard(
                             )
                         }
                         PlayerCardButton(
-                            "Not now",
+                            Copy.notNow,
                             isPrimary = false,
                             grabsFocus = false,
                             onClick = onDismiss,
@@ -855,15 +856,15 @@ internal fun EndOfEpisodeCard(
                     // dismiss something that was already leaving.
                     requested -> Unit
                     offer != null && offer.alreadyRequested ->
-                        PlayerCardButton("OK", isPrimary = true, grabsFocus = true, onClick = onDismiss)
+                        PlayerCardButton(Copy.ok, isPrimary = true, grabsFocus = true, onClick = onDismiss)
                     offer != null -> {
                         PlayerCardButton(
-                            label = "Request season ${offer.seasonNumber}",
+                            label = Copy.requestSeason(offer.seasonNumber),
                             isPrimary = true,
                             grabsFocus = true,
                             onClick = { requestSeason(offer) },
                         )
-                        PlayerCardButton("Not now", isPrimary = false, grabsFocus = false, onClick = onDismiss)
+                        PlayerCardButton(Copy.notNow, isPrimary = false, grabsFocus = false, onClick = onDismiss)
                     }
                 }
             }
@@ -1044,9 +1045,9 @@ private fun SubtitleSyncControl(
             // Says which way it moved: "-0.75s" alone tells nobody whether
             // that is earlier or later
             when {
-                delaySeconds == 0.0 -> "Subtitles in sync"
-                delaySeconds > 0 -> "Subtitles %.2fs later".format(delaySeconds)
-                else -> "Subtitles %.2fs earlier".format(-delaySeconds)
+                delaySeconds == 0.0 -> Copy.subtitlesInSync
+                delaySeconds > 0 -> Copy.subtitlesLater("%.2f".format(delaySeconds))
+                else -> Copy.subtitlesEarlier("%.2f".format(-delaySeconds))
             },
             color = Color.White,
             style = MaterialTheme.typography.labelLarge,
@@ -1059,7 +1060,7 @@ private fun SubtitleSyncControl(
         SyncButton("+") { onNudge(SUBTITLE_DELAY_STEP) }
         // Also fixed: an appearing Reset would shove the row sideways
         Box(modifier = Modifier.widthIn(min = 84.dp), contentAlignment = Alignment.Center) {
-            if (delaySeconds != 0.0) SyncButton("Reset", onClick = onReset)
+            if (delaySeconds != 0.0) SyncButton(Copy.reset, onClick = onReset)
         }
     }
 }

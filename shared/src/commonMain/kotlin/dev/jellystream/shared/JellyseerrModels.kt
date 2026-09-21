@@ -33,12 +33,12 @@ enum class RequestState {
     /** Short label, identical on every platform. */
     val label: String
         get() = when (this) {
-            AVAILABLE -> "Available"
-            PARTIALLY_AVAILABLE -> "Partly available"
-            PROCESSING -> "Downloading"
-            PENDING -> "Awaiting approval"
-            DECLINED -> "Declined"
-            REQUESTABLE -> "Request"
+            AVAILABLE -> Copy.available
+            PARTIALLY_AVAILABLE -> Copy.partlyAvailable
+            PROCESSING -> Copy.downloading
+            PENDING -> Copy.awaitingApproval
+            DECLINED -> Copy.declined
+            REQUESTABLE -> Copy.request
         }
 
     /** Whether the Request button does anything. */
@@ -162,7 +162,7 @@ data class JellyseerrSeason(
     /** TMDb localises the name; fall back rather than show an empty pill. */
     val displayName: String
         get() = name?.takeIf { it.isNotBlank() }
-            ?: if (isSpecials) "Specials" else "Season $seasonNumber"
+            ?: if (isSpecials) Copy.specials else Copy.seasonNumber(seasonNumber)
 }
 
 /**
@@ -342,8 +342,8 @@ data class JellyseerrRequest(
             val numbers = seasons.map { it.seasonNumber }.filter { it > 0 }.sorted().distinct()
             return when {
                 numbers.isEmpty() -> null
-                numbers.size == 1 -> "Season ${numbers.first()}"
-                else -> "Seasons " + numbers.joinToString(", ")
+                numbers.size == 1 -> Copy.seasonNumber(numbers.first())
+                else -> Copy.seasonsList(numbers.joinToString(", "))
             }
         }
 }
@@ -370,7 +370,7 @@ data class RequestedTitle(
     /** Never blank: an unreachable detail endpoint still gets a row. */
     val displayTitle: String
         get() = title?.takeIf { it.isNotBlank() }
-            ?: if (isSeries) "Series request" else "Film request"
+            ?: if (isSeries) Copy.seriesRequest else Copy.filmRequest
 
     val isSeries: Boolean
         get() = request.isSeries
@@ -388,7 +388,7 @@ data class RequestedTitle(
     /** "Series · 2022 · Season 2" — everything under the title, in one line. */
     val subtitle: String
         get() = listOfNotNull(
-            if (isSeries) "Series" else "Film",
+            if (isSeries) Copy.series else Copy.film,
             year,
             request.seasonsLabel,
         ).joinToString(" · ")

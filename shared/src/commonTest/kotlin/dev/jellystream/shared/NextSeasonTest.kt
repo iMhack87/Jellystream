@@ -3,7 +3,6 @@ package dev.jellystream.shared
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
-import kotlin.test.assertTrue
 
 /**
  * The rule that decides whether finishing an episode ends with an offer.
@@ -140,8 +139,8 @@ class NextSeasonOfferCopyTest {
     fun theEndOfTheSeasonSaysSo() {
         val card = offer(alreadyRequested = false, episodesLeft = 0)
 
-        assertEquals("Season 2 isn't on the server", card.title)
-        assertTrue(card.body.contains("last episode of season 1 of Severance"))
+        assertEquals(Copy.seasonNotOnServer(2), card.title)
+        assertEquals(Copy.lastEpisodeOfSeason(1, "Severance"), card.body)
     }
 
     @Test
@@ -149,15 +148,15 @@ class NextSeasonOfferCopyTest {
         // Fired one episode early, "that was the last episode" is a lie
         val card = offer(alreadyRequested = false, episodesLeft = 1)
 
-        assertEquals("One episode left of season 1 of Severance.", card.body)
+        assertEquals(Copy.oneEpisodeLeft(1, "Severance"), card.body)
     }
 
     @Test
     fun aSeasonAlreadyAskedForOffersNothingToDo() {
         val card = offer(alreadyRequested = true, episodesLeft = 0)
 
-        assertEquals("Season 2 is on the way", card.title)
-        assertTrue(card.body.contains("already requested"))
+        assertEquals(Copy.seasonOnTheWay(2), card.title)
+        assertEquals(Copy.alreadyRequestedBody("Severance"), card.body)
     }
 }
 

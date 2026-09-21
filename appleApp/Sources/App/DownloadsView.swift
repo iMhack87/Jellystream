@@ -15,10 +15,7 @@ struct DownloadsView: View {
     var body: some View {
         List {
             if downloader.downloads.items.isEmpty {
-                Text(
-                    "Nothing downloaded yet. Open a film or an episode and tap "
-                    + "Download to keep it on this device."
-                )
+                Text(Copy.shared.nothingDownloaded)
                 .foregroundStyle(.secondary)
             }
             ForEach(downloader.downloads.items, id: \.itemId) { item in
@@ -30,14 +27,14 @@ struct DownloadsView: View {
                 #else
                 DownloadRow(item: item, onPlay: { onPlay(item) })
                     .swipeActions {
-                        Button("Remove", role: .destructive) {
+                        Button(Copy.shared.remove, role: .destructive) {
                             downloader.remove(itemId: item.itemId)
                         }
                     }
                 #endif
             }
         }
-        .navigationTitle("Downloads")
+        .navigationTitle(Copy.shared.downloads)
         .cinemaChrome()
     }
 }
@@ -79,11 +76,11 @@ private struct DownloadRow: View {
 
     private var statusLabel: String {
         switch item.state {
-        case .queued: return "Queued"
+        case .queued: return Copy.shared.queued
         case .downloading:
-            return item.progress.map { "\(Int($0.doubleValue * 100))%" } ?? "Downloading"
-        case .complete: return "On device"
-        case .failed: return "Failed"
+            return item.progress.map { "\(Int($0.doubleValue * 100))%" } ?? Copy.shared.downloading
+        case .complete: return Copy.shared.onDevice
+        case .failed: return Copy.shared.failed
         default: return ""
         }
     }

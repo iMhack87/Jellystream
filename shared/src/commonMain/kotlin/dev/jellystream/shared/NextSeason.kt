@@ -20,20 +20,20 @@ data class NextSeasonOffer(
 ) {
     val title: String
         get() = if (alreadyRequested) {
-            "Season $seasonNumber is on the way"
+            Copy.seasonOnTheWay(seasonNumber)
         } else {
-            "Season $seasonNumber isn't on the server"
+            Copy.seasonNotOnServer(seasonNumber)
         }
 
     val body: String
         get() = when {
-            alreadyRequested -> "$seriesName · already requested, nothing to do."
+            alreadyRequested -> Copy.alreadyRequestedBody(seriesName)
             episodesLeft == 1 ->
-                "One episode left of season ${seasonNumber - 1} of $seriesName."
+                Copy.oneEpisodeLeft(seasonNumber - 1, seriesName)
             episodesLeft > 1 ->
-                "$episodesLeft episodes left of season ${seasonNumber - 1} of $seriesName."
+                Copy.episodesLeftOfSeason(episodesLeft, seasonNumber - 1, seriesName)
             else ->
-                "That was the last episode of season ${seasonNumber - 1} of $seriesName."
+                Copy.lastEpisodeOfSeason(seasonNumber - 1, seriesName)
         }
 }
 

@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.jellystream.shared.Copy
 import dev.jellystream.shared.DownloadState
 import dev.jellystream.shared.DownloadedItem
 import dev.jellystream.shared.PersistedDownloads
@@ -49,7 +50,7 @@ fun DownloadsScreen(
         ) {
             item(key = "title") {
                 Text(
-                    "Downloads",
+                    Copy.downloads,
                     style = MaterialTheme.typography.headlineMedium,
                     color = CinemaColors.TextPrimary,
                 )
@@ -57,8 +58,7 @@ fun DownloadsScreen(
             if (downloads.items.isEmpty()) {
                 item(key = "empty") {
                     Text(
-                        "Nothing downloaded yet. Open a film or an episode and tap "
-                            + "Download to keep it on this device.",
+                        Copy.nothingDownloaded,
                         style = MaterialTheme.typography.bodyMedium,
                         color = CinemaColors.TextSecondary,
                     )
@@ -130,7 +130,7 @@ private fun DownloadRow(
             )
             Spacer(Modifier.width(12.dp))
             Text(
-                "Remove",
+                Copy.remove,
                 style = MaterialTheme.typography.labelLarge,
                 color = CinemaColors.TextSecondary,
                 modifier = Modifier
@@ -150,9 +150,9 @@ private fun DownloadRow(
 }
 
 private fun statusLabel(item: DownloadedItem): String = when (item.state) {
-    DownloadState.QUEUED -> "Queued"
+    DownloadState.QUEUED -> Copy.queued
     DownloadState.DOWNLOADING ->
-        item.progress?.let { "${(it * 100).toInt()}%" } ?: "Downloading"
-    DownloadState.COMPLETE -> "On device"
-    DownloadState.FAILED -> "Failed"
+        item.progress?.let { "${(it * 100).toInt()}%" } ?: Copy.downloading
+    DownloadState.COMPLETE -> Copy.onDevice
+    DownloadState.FAILED -> Copy.failed
 }

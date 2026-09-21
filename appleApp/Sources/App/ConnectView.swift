@@ -107,7 +107,7 @@ final class AppModel: ObservableObject {
         }
         session = nil
         addingProfile = false
-        status = .failure("Session expired — please sign in again")
+        status = .failure(Copy.shared.sessionExpired)
     }
 
     private static func makeApi(deviceId: String) -> JellyfinApi {
@@ -257,7 +257,7 @@ final class AppModel: ObservableObject {
                 guard let baseUrl = started.first as? String,
                       let initial = started.second as? QuickConnectState
                 else {
-                    status = .failure("Quick Connect is unavailable on this server")
+                    status = .failure(Copy.shared.quickConnectUnavailable)
                     return
                 }
                 quickConnectCode = initial.code
@@ -268,7 +268,7 @@ final class AppModel: ObservableObject {
                 while !authenticated {
                     if Date() > deadline {
                         quickConnectCode = nil
-                        status = .failure("Quick Connect code expired — try again")
+                        status = .failure(Copy.shared.quickConnectExpired)
                         return
                     }
                     try await Task.sleep(nanoseconds: 3_000_000_000)
@@ -502,20 +502,20 @@ struct ConnectView: View {
         }
         .cinemaChrome()
         .alert(
-            "Unencrypted connection",
+            Copy.shared.unencryptedTitle,
             isPresented: Binding(
                 get: { model.pendingInsecure != nil },
                 set: { if !$0 { model.cancelInsecureConnection() } }
             )
         ) {
-            Button("Connect Anyway", role: .destructive) {
+            Button(Copy.shared.connectAnyway, role: .destructive) {
                 model.confirmInsecureConnection()
             }
-            Button("Cancel", role: .cancel) {
+            Button(Copy.shared.cancel, role: .cancel) {
                 model.cancelInsecureConnection()
             }
         } message: {
-            Text("This server is only reachable over plain HTTP. Your password and streams would travel unencrypted on the network.")
+            Text(Copy.shared.unencryptedBody)
         }
         #if os(tvOS)
         .onExitCommand {
@@ -528,14 +528,14 @@ struct ConnectView: View {
     private var macConnect: some View {
         VStack(spacing: 28) {
             Spacer(minLength: 24)
-            Text(model.addingProfile ? "Add Profile" : "Jellystream")
+            Text(model.addingProfile ? Copy.shared.addProfile : "Jellystream")
                 .font(.system(size: 34, weight: .bold))
                 .foregroundStyle(.white)
 
             VStack(spacing: 12) {
-                macField("Server URL", text: $serverUrl, secure: false)
-                macField("Username", text: $username, secure: false)
-                macField("Password", text: $password, secure: true)
+                macField(Copy.shared.serverUrl, text: $serverUrl, secure: false)
+                macField(Copy.shared.username, text: $username, secure: false)
+                macField(Copy.shared.password, text: $password, secure: true)
             }
             .frame(maxWidth: 420)
 
@@ -543,7 +543,7 @@ struct ConnectView: View {
                 Button {
                     model.login(serverUrl: serverUrl, username: username, password: password)
                 } label: {
-                    Text("Connect")
+                    Text(Copy.shared.connect)
                         .font(.headline)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
@@ -554,7 +554,7 @@ struct ConnectView: View {
                 .disabled(model.isLoading || serverUrl.isEmpty)
                 .opacity(serverUrl.isEmpty ? 0.4 : 1)
 
-                Button("Use Quick Connect") {
+                Button(Copy.shared.quickConnect) {
                     model.startQuickConnect(serverUrl: serverUrl)
                 }
                 .buttonStyle(.plain)
@@ -562,7 +562,7 @@ struct ConnectView: View {
                 .disabled(model.isLoading || serverUrl.isEmpty)
 
                 if model.addingProfile {
-                    Button("Back to profiles") { model.cancelAddProfile() }
+                    Button(Copy.shared.backToProfiles) { model.cancelAddProfile() }
                         .buttonStyle(.plain)
                         .foregroundStyle(.secondary)
                 }
@@ -574,7 +574,7 @@ struct ConnectView: View {
                     Text(code)
                         .font(.system(size: 36, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
-                    Text("Enter this code in Jellyfin on your phone or browser")
+                    Text(Copy.shared.enterCode)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -616,19 +616,19 @@ struct ConnectView: View {
 
     private var formConnect: some View {
         Form {
-            Section("Server") {
-                TextField("Server URL", text: $serverUrl)
+            Section(Copy.shared.server) {
+                TextField(Copy.shared.serverUrl, text: $serverUrl)
                     .textContentType(.URL)
                     .autocorrectionDisabled()
                     .neverAutocapitalize()
-                TextField("Username", text: $username)
+                TextField(Copy.shared.username, text: $username)
                     .autocorrectionDisabled()
                     .neverAutocapitalize()
-                SecureField("Password", text: $password)
+                SecureField(Copy.shared.password, text: $password)
             }
 
             Section {
-                Button("Connect") {
+                Button(Copy.shared.connect) {
                     model.login(
                         serverUrl: serverUrl,
                         username: username,
@@ -638,24 +638,24 @@ struct ConnectView: View {
                 .disabled(model.isLoading || serverUrl.isEmpty)
 
                 // No on-screen keyboard needed — ideal on Apple TV
-                Button("Use Quick Connect") {
+                Button(Copy.shared.quickConnect) {
                     model.startQuickConnect(serverUrl: serverUrl)
                 }
                 .disabled(model.isLoading || serverUrl.isEmpty)
 
                 // Adding from the picker must always offer a way back
                 if model.addingProfile {
-                    Button("Back to profiles", role: .cancel) {
+                    Button(Copy.shared.backToProfiles, role: .cancel) {
                         model.cancelAddProfile()
                     }
                 }
             }
 
             if let code = model.quickConnectCode {
-                Section("Quick Connect") {
+                Section(Copy.shared.quickConnect) {
                     Text(code)
                         .font(.system(.largeTitle, design: .rounded).bold())
-                    Text("Enter this code in Jellyfin on your phone or browser")
+                    Text(Copy.shared.enterCode)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -663,7 +663,7 @@ struct ConnectView: View {
 
             statusView
         }
-        .navigationTitle(model.addingProfile ? "Add Profile" : "Jellystream")
+        .navigationTitle(model.addingProfile ? Copy.shared.addProfile : "Jellystream")
     }
 
     @ViewBuilder

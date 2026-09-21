@@ -37,6 +37,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import dev.jellystream.shared.Copy
 import dev.jellystream.shared.JellyseerrApi
 import dev.jellystream.shared.JellyseerrResult
 import dev.jellystream.shared.JellyseerrTvDetails
@@ -128,15 +129,15 @@ fun RequestsScreen(
             when (val outcome = seerr.request(tmdbId, isSeries)) {
                 is RequestOutcome.Sent -> {
                     justRequested[tmdbId] = RequestState.PENDING
-                    notice = "Requested $title"
+                    notice = Copy.requested(title)
                     seerr.myRequestsDetailed(REQUEST_PAGE)?.let { mine = it }
                 }
                 is RequestOutcome.AlreadyRequested -> {
                     justRequested[tmdbId] = RequestState.PENDING
-                    notice = "$title was already requested"
+                    notice = Copy.alreadyRequestedTitle(title)
                 }
                 is RequestOutcome.NotSignedIn ->
-                    notice = "Sign in to Jellyseerr again in Settings"
+                    notice = Copy.signInSeerrAgain
                 is RequestOutcome.Failed -> notice = outcome.message
             }
         }
@@ -165,7 +166,7 @@ fun RequestsScreen(
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
-                    label = { Text("Search for something to request") },
+                    label = { Text(Copy.searchToRequest) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().tvDefaultFocus(),
                 )
@@ -176,11 +177,11 @@ fun RequestsScreen(
             }
 
             if (query.isBlank()) {
-                item(key = "mine-header") { SectionLabel("Your requests") }
+                item(key = "mine-header") { SectionLabel(Copy.yourRequests) }
                 if (mine.isEmpty()) {
                     item(key = "mine-empty") {
                         Text(
-                            "Nothing requested yet. Search above to ask for a film or a series.",
+                            Copy.nothingRequestedYet,
                             style = MaterialTheme.typography.bodyMedium,
                             color = CinemaColors.TextSecondary,
                         )
@@ -199,7 +200,7 @@ fun RequestsScreen(
                 } else if (results.isEmpty()) {
                     item(key = "no-results") {
                         Text(
-                            "Nothing found for \"$query\".",
+                            Copy.nothingFound(query),
                             style = MaterialTheme.typography.bodyMedium,
                             color = CinemaColors.TextSecondary,
                         )
@@ -276,14 +277,14 @@ internal fun SeasonPicker(
             when (val outcome = seerr.requestSeasons(show.id, listOf(number))) {
                 is RequestOutcome.Sent -> {
                     justRequested[number] = RequestState.PENDING
-                    onNotice("Requested ${show.displayTitle} season $number")
+                    onNotice(Copy.requestedSeason(show.displayTitle, number))
                 }
                 is RequestOutcome.AlreadyRequested -> {
                     justRequested[number] = RequestState.PENDING
-                    onNotice("Season $number was already requested")
+                    onNotice(Copy.seasonAlreadyRequested(number))
                 }
                 is RequestOutcome.NotSignedIn ->
-                    onNotice("Sign in to Jellyseerr again in Settings")
+                    onNotice(Copy.signInSeerrAgain)
                 is RequestOutcome.Failed -> onNotice(outcome.message)
             }
         }
@@ -327,7 +328,7 @@ internal fun SeasonPicker(
                 }
                 loaded == null -> item(key = "failed") {
                     Text(
-                        "Couldn't load seasons for ${show.displayTitle}.",
+                        Copy.couldntLoadSeasons(show.displayTitle),
                         style = MaterialTheme.typography.bodyMedium,
                         color = CinemaColors.TextSecondary,
                     )
@@ -335,7 +336,7 @@ internal fun SeasonPicker(
                 else -> {
                     item(key = "all-seasons") {
                         SeasonRow(
-                            title = "All seasons",
+                            title = Copy.allSeasons,
                             subtitle = null,
                             state = null,
                             enabled = true,
@@ -348,7 +349,7 @@ internal fun SeasonPicker(
                         val state = optimistic ?: loaded.stateOf(season.seasonNumber)
                         SeasonRow(
                             title = season.displayName,
-                            subtitle = season.episodeCount?.let { "$it episodes" },
+                            subtitle = season.episodeCount?.let { Copy.episodesCount(it) },
                             state = state,
                             // Season-level, not the title-level rule: a
                             // partly-available season looks requestable and
@@ -480,7 +481,7 @@ private fun ResultRow(
             )
             val meta = listOfNotNull(
                 result.year,
-                if (result.isSeries) "Series" else "Film",
+                if (result.isSeries) Copy.series else Copy.film,
             ).joinToString(" · ")
             Text(
                 meta,

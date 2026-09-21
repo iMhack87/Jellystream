@@ -38,6 +38,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import dev.jellystream.shared.BaseItem
+import dev.jellystream.shared.Copy
 import dev.jellystream.shared.CatalogQuery
 import dev.jellystream.shared.JellyfinApi
 import dev.jellystream.shared.PersonCredit
@@ -87,7 +88,7 @@ fun CatalogScreen(
                     modifier = Modifier.align(Alignment.CenterHorizontally).padding(48.dp),
                 )
                 items!!.isEmpty() -> Text(
-                    "Nothing in here yet",
+                    Copy.nothingInHere,
                     color = CinemaColors.TextSecondary,
                     modifier = Modifier.padding(24.dp),
                 )
@@ -131,7 +132,7 @@ fun CatalogScreen(
         FloatingNavButton(
             onClick = onBack,
             icon = Icons.AutoMirrored.Filled.ArrowBack,
-            contentDescription = "Back",
+            contentDescription = Copy.back,
             modifier = Modifier.align(Alignment.TopStart),
         )
     }
@@ -146,7 +147,7 @@ fun PersonRow(
     val shown = CatalogQuery.actors(people)
     if (shown.isEmpty()) return
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("Cast", style = MaterialTheme.typography.titleMedium)
+        Text(Copy.cast, style = MaterialTheme.typography.titleMedium)
         LazyRow(
             contentPadding = PaddingValues(end = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),

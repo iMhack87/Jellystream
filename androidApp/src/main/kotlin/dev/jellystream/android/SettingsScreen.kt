@@ -42,6 +42,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.jellystream.shared.AppSettings
+import dev.jellystream.shared.Copy
 import dev.jellystream.shared.BaseItem
 import dev.jellystream.shared.JellyfinApi
 import dev.jellystream.shared.LanguageCode
@@ -149,19 +150,19 @@ fun SettingsScreen(
             }
 
             item(key = "account") {
-                SettingsSection("Account") {
+                SettingsSection(Copy.account) {
                     // "Who's watching?" is also the only path from a
                     // single-profile install to adding a second account.
                     // It also takes initial focus on TV: without it the
                     // remote lands on the floating back button, and D-pad
                     // Down does not find its way into the list from there.
                     SettingsAction(
-                        "Switch profile",
+                        Copy.switchProfile,
                         onClick = onSwitchProfile,
                         modifier = Modifier.tvDefaultFocus(),
                     )
                     SettingsAction(
-                        "Log out",
+                        Copy.logOut,
                         onClick = onLogout,
                         tint = MaterialTheme.colorScheme.error,
                     )
@@ -174,10 +175,10 @@ fun SettingsScreen(
                     // the music and photo ones this player starts with
                     // switched off — hidden is a choice here, never a
                     // library the user can no longer find.
-                    SettingsSection("Home screen") {
+                    SettingsSection(Copy.homeScreen) {
                         libraries.forEach { view ->
                             SettingsToggle(
-                                title = view.name ?: "Library",
+                                title = view.name ?: Copy.library,
                                 subtitle = null,
                                 checked = settings.showsLibrary(view),
                                 onCheckedChange = {
@@ -191,36 +192,34 @@ fun SettingsScreen(
 
             if (!onTelevision) {
                 item(key = "downloads") {
-                    SettingsSection("Offline") {
-                        SettingsAction("Downloads", onClick = onOpenDownloads)
+                    SettingsSection(Copy.offline) {
+                        SettingsAction(Copy.downloads, onClick = onOpenDownloads)
                     }
                 }
             }
 
             item(key = "requests") {
-                SettingsSection("Requests") {
+                SettingsSection(Copy.requests) {
                     SettingsChoice(
-                        label = "Jellyseerr server",
+                        label = Copy.jellyseerrServer,
                         value = link?.baseUrl?.removePrefix("https://")?.removePrefix("http://")
-                            ?: "Not set",
+                            ?: Copy.notSet,
                         onClick = { editingServer = true },
                     )
                     if (link != null) {
                         SettingsChoice(
-                            label = "Account",
-                            value = if (link.isSignedIn) "Signed in" else "Sign in",
+                            label = Copy.account,
+                            value = if (link.isSignedIn) Copy.signedIn else Copy.signIn,
                             onClick = { signingIn = true },
                         )
                         SettingsAction(
-                            "Browse and request",
+                            Copy.browseAndRequest,
                             onClick = onOpenRequests,
                         )
                     }
                 }
                 Text(
-                    "Requests are made with this profile's own Jellyfin account, so "
-                        + "quotas and history stay yours. Only the session is kept — "
-                        + "never the password.",
+                    Copy.requestsFooter,
                     style = MaterialTheme.typography.bodySmall,
                     color = CinemaColors.TextSecondary,
                     modifier = Modifier.padding(start = 4.dp, top = 6.dp),
@@ -228,9 +227,9 @@ fun SettingsScreen(
             }
 
             item(key = "subtitles") {
-                SettingsSection("Subtitles") {
+                SettingsSection(Copy.subtitles) {
                     SettingsChoice(
-                        label = "When to show",
+                        label = Copy.whenToShow,
                         value = settings.subtitleMode.label,
                         onClick = {
                             onChange(
@@ -241,21 +240,19 @@ fun SettingsScreen(
                         },
                     )
                     SettingsChoice(
-                        label = "Language",
+                        label = Copy.language,
                         value = SubtitleLanguages.labelFor(settings.subtitleLanguage),
                         onClick = { onChange(settings.withSubtitleLanguage(nextLanguage(settings.subtitleLanguage))) },
                     )
                     SettingsChoice(
-                        label = "Size",
+                        label = Copy.size,
                         value = scaleLabel(settings.subtitleScale),
                         onClick = { onChange(settings.withSubtitleScale(nextScale(settings.subtitleScale))) },
                         last = true,
                     )
                 }
                 Text(
-                    "Smart turns on full subtitles when the audio is not in your "
-                        + "language, and only forced ones when it is. Device language "
-                        + "follows the system: ${deviceLanguageLabel()}.",
+                    Copy.subtitleHelpNamed(deviceLanguageLabel()),
                     style = MaterialTheme.typography.bodySmall,
                     color = CinemaColors.TextSecondary,
                     modifier = Modifier.padding(start = 4.dp, top = 6.dp),
@@ -263,21 +260,16 @@ fun SettingsScreen(
             }
 
             item(key = "playback") {
-                SettingsSection("Playback") {
+                SettingsSection(Copy.playback) {
                     SettingsToggle(
-                        title = "Play next episode automatically",
-                        subtitle = "When an episode ends, the next one starts after a "
-                            + "ten-second countdown you can stop. Off keeps the same "
-                            + "card and the same button — it just waits for you.",
+                        title = Copy.playNextAuto,
+                        subtitle = Copy.playNextHelp,
                         checked = settings.autoPlayNextEpisode,
                         onCheckedChange = { onChange(settings.withAutoPlayNextEpisode(it)) },
                     )
                     SettingsToggle(
-                        title = "Always transcode",
-                        subtitle = "Direct Play sends the original file untouched — leave "
-                            + "this off. Turn it on only if a title stutters or won't "
-                            + "decode: the server will re-encode it, at the cost of CPU "
-                            + "and quality.",
+                        title = Copy.alwaysTranscode,
+                        subtitle = Copy.transcodeHelp,
                         checked = settings.alwaysTranscode,
                         onCheckedChange = { onChange(settings.withAlwaysTranscode(it)) },
                     )
@@ -285,9 +277,9 @@ fun SettingsScreen(
             }
 
             item(key = "about") {
-                SettingsSection("About") {
+                SettingsSection(Copy.about) {
                     SettingsValue("Jellystream", JellyfinApi.CLIENT_VERSION)
-                    SettingsValue("Server", session.serverLabel)
+                    SettingsValue(Copy.server, session.serverLabel)
                     serverVersion?.let { SettingsValue("Jellyfin", it) }
                 }
             }
@@ -491,7 +483,7 @@ private fun nextScale(current: Double): Double {
 }
 
 private fun scaleLabel(scale: Double): String = when {
-    kotlin.math.abs(scale - 1.0) < 0.01 -> "Normal"
+    kotlin.math.abs(scale - 1.0) < 0.01 -> Copy.normal
     else -> "${(scale * 100).toInt()}%"
 }
 
@@ -529,25 +521,25 @@ private fun JellyseerrServerDialog(
     var url by remember { mutableStateOf(current) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Jellyseerr server") },
+        title = { Text(Copy.jellyseerrServer) },
         text = {
             OutlinedTextField(
                 value = url,
                 onValueChange = { url = it },
                 singleLine = true,
-                label = { Text("Address") },
+                label = { Text(Copy.address) },
                 placeholder = { Text("seerr.example.com") },
                 modifier = Modifier.fillMaxWidth().tvDefaultFocus(),
             )
         },
-        confirmButton = { TextButton(onClick = { onSave(url) }) { Text("Save") } },
+        confirmButton = { TextButton(onClick = { onSave(url) }) { Text(Copy.save) } },
         dismissButton = {
             Row {
                 // Clearing the field is how a profile stops using Jellyseerr
                 if (current.isNotEmpty()) {
-                    TextButton(onClick = { onSave(null) }) { Text("Remove") }
+                    TextButton(onClick = { onSave(null) }) { Text(Copy.remove) }
                 }
-                TextButton(onClick = onDismiss) { Text("Cancel") }
+                TextButton(onClick = onDismiss) { Text(Copy.cancel) }
             }
         },
     )
@@ -573,7 +565,7 @@ private fun JellyseerrSignInDialog(
 
     AlertDialog(
         onDismissRequest = { if (!busy) onDismiss() },
-        title = { Text("Sign in to Jellyseerr") },
+        title = { Text(Copy.signInToJellyseerr) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
@@ -585,13 +577,13 @@ private fun JellyseerrSignInDialog(
                     value = password,
                     onValueChange = { password = it; failed = false },
                     singleLine = true,
-                    label = { Text("Jellyfin password") },
+                    label = { Text(Copy.jellyfinPassword) },
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth().tvDefaultFocus(),
                 )
                 if (failed) {
                     Text(
-                        "Jellyseerr refused those credentials.",
+                        Copy.seerrRefused,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
@@ -609,8 +601,8 @@ private fun JellyseerrSignInDialog(
                         if (ok) onDismiss() else failed = true
                     }
                 },
-            ) { Text(if (busy) "Signing in…" else "Sign in") }
+            ) { Text(if (busy) Copy.signingIn else Copy.signIn) }
         },
-        dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text(Copy.cancel) } },
     )
 }

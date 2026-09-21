@@ -64,6 +64,7 @@ import coil.compose.AsyncImage
 import dev.jellystream.shared.DownloadAvailability
 import dev.jellystream.shared.DownloadState
 import dev.jellystream.shared.BaseItem
+import dev.jellystream.shared.Copy
 import dev.jellystream.shared.ItemRatings
 import dev.jellystream.shared.JellyfinApi
 import dev.jellystream.shared.JellyseerrApi
@@ -103,7 +104,7 @@ fun RatingsRow(ratings: ItemRatings, modifier: Modifier = Modifier) {
             ) {
                 Icon(
                     Icons.Default.Star,
-                    contentDescription = "Audience rating",
+                    contentDescription = Copy.audienceRating(score),
                     tint = CinemaColors.RatingStar,
                     modifier = Modifier.size(16.dp),
                 )
@@ -152,7 +153,7 @@ fun FloatingNavButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     icon: androidx.compose.ui.graphics.vector.ImageVector = Icons.AutoMirrored.Filled.ArrowBack,
-    contentDescription: String = "Back",
+    contentDescription: String = Copy.back,
 ) {
     Box(
         modifier = modifier
@@ -208,7 +209,7 @@ fun DetailScreen(
             }
             if (!ok) {
                 full = full.withFavorite(!wanted)
-                actionError = "Couldn't reach the server"
+                actionError = Copy.couldntReach
             }
         }
     }
@@ -227,7 +228,7 @@ fun DetailScreen(
             }
             if (!ok) {
                 full = full.withWatched(!wanted)
-                actionError = "Couldn't reach the server"
+                actionError = Copy.couldntReach
             }
         }
     }
@@ -283,7 +284,7 @@ fun DetailScreen(
 
             val meta = buildList {
                 full.productionYear?.let { add(it.toString()) }
-                full.runtimeMinutes?.let { add("$it min") }
+                full.runtimeMinutes?.let { add(Copy.minutes(it)) }
             }.joinToString("  ·  ")
             if (meta.isNotEmpty()) {
                 Text(
@@ -349,9 +350,9 @@ fun DetailScreen(
                 val resume = full.resumePositionSeconds
                 Text(
                     if (resume > 60) {
-                        "Resume (${(resume / 60).toInt()} min)"
+                        Copy.resumeMinutes((resume / 60).toInt())
                     } else {
-                        "Play"
+                        Copy.play
                     }
                 )
             }
@@ -371,9 +372,9 @@ fun DetailScreen(
                     Icon(
                         if (full.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                         contentDescription = if (full.isFavorite) {
-                            "Remove from favourites"
+                            Copy.removeFavourite
                         } else {
-                            "Add to favourites"
+                            Copy.addFavourite
                         },
                         tint = CinemaColors.TextPrimary,
                     )
@@ -382,7 +383,7 @@ fun DetailScreen(
                     onClick = { toggleWatched() },
                     modifier = Modifier.dpadFocusEffect(RoundedCornerShape(10.dp)),
                 ) {
-                    Text(if (full.isWatched) "Mark as unwatched" else "Mark as watched")
+                    Text(if (full.isWatched) Copy.markUnwatched else Copy.markWatched)
                 }
                 TextButton(
                     onClick = { onWatchlistChange(watchlist.toggled(WatchlistEntry.of(full))) },
@@ -390,9 +391,9 @@ fun DetailScreen(
                 ) {
                     Text(
                         if (watchlist.contains(full)) {
-                            "Remove from watchlist"
+                            Copy.removeWatchlist
                         } else {
-                            "Add to watchlist"
+                            Copy.addWatchlist
                         }
                     )
                 }
@@ -418,7 +419,7 @@ fun DetailScreen(
                         onClick = onDownload,
                         modifier = Modifier.dpadFocusEffect(RoundedCornerShape(10.dp)),
                     ) {
-                        Text("Download")
+                        Text(Copy.download)
                     }
                     // Say why rather than show a button that would 401
                     download.explanation != null -> Text(
@@ -512,7 +513,7 @@ fun SeriesScreen(
                 episodes = episodes.map {
                     if (it.id == episode.id) it.withWatched(!watched) else it
                 }
-                actionError = "Couldn't reach the server"
+                actionError = Copy.couldntReach
             }
         }
     }
@@ -531,7 +532,7 @@ fun SeriesScreen(
             }
             if (!ok) {
                 show = show.withFavorite(!wanted)
-                actionError = "Couldn't reach the server"
+                actionError = Copy.couldntReach
             }
         }
     }
@@ -605,9 +606,9 @@ fun SeriesScreen(
                                 Icons.Default.FavoriteBorder
                             },
                             contentDescription = if (show.isFavorite) {
-                                "Remove from favourites"
+                                Copy.removeFavourite
                             } else {
-                                "Add to favourites"
+                                Copy.addFavourite
                             },
                             tint = CinemaColors.TextPrimary,
                         )
@@ -620,9 +621,9 @@ fun SeriesScreen(
                     ) {
                         Text(
                             if (watchlist.contains(show)) {
-                                "Remove from watchlist"
+                                Copy.removeWatchlist
                             } else {
-                                "Add to watchlist"
+                                Copy.addWatchlist
                             }
                         )
                     }
@@ -734,7 +735,7 @@ private fun EpisodeCard(
             if (episode.isWatched) {
                 Icon(
                     Icons.Default.CheckCircle,
-                    contentDescription = "Watched",
+                    contentDescription = Copy.markWatched,
                     tint = Color.White,
                     modifier = Modifier
                         .align(Alignment.TopEnd)
@@ -762,7 +763,7 @@ private fun EpisodeCard(
             }
             episode.runtimeMinutes?.let {
                 Text(
-                    "$it min",
+                    Copy.minutes(it),
                     style = MaterialTheme.typography.labelSmall,
                     color = Color.White,
                     modifier = Modifier
@@ -776,7 +777,7 @@ private fun EpisodeCard(
         }
         episode.indexNumber?.let {
             Text(
-                "EPISODE $it",
+                Copy.episode(it),
                 style = MaterialTheme.typography.labelSmall,
                 color = CinemaColors.TextSecondary,
                 modifier = Modifier.padding(top = 6.dp),
@@ -878,14 +879,14 @@ fun SearchScreen(
             when (val outcome = seerr.request(tmdbId, isSeries)) {
                 is RequestOutcome.Sent -> {
                     justRequested[tmdbId] = RequestState.PENDING
-                    notice = "Requested $title"
+                    notice = Copy.requested(title)
                 }
                 is RequestOutcome.AlreadyRequested -> {
                     justRequested[tmdbId] = RequestState.PENDING
-                    notice = "$title was already requested"
+                    notice = Copy.alreadyRequestedTitle(title)
                 }
                 is RequestOutcome.NotSignedIn ->
-                    notice = "Sign in to Jellyseerr again in Settings"
+                    notice = Copy.signInSeerrAgain
                 is RequestOutcome.Failed -> notice = outcome.message
             }
         }
@@ -913,7 +914,7 @@ fun SearchScreen(
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                label = { Text("Search") },
+                label = { Text(Copy.search) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().tvDefaultFocus(),
             )
@@ -923,9 +924,9 @@ fun SearchScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.padding(top = 12.dp),
         ) {
-            FilterPill("All", kind == SearchKind.ALL) { kind = SearchKind.ALL }
-            FilterPill("Films", kind == SearchKind.FILMS) { kind = SearchKind.FILMS }
-            FilterPill("Series", kind == SearchKind.SERIES) { kind = SearchKind.SERIES }
+            FilterPill(Copy.all, kind == SearchKind.ALL) { kind = SearchKind.ALL }
+            FilterPill(Copy.films, kind == SearchKind.FILMS) { kind = SearchKind.FILMS }
+            FilterPill(Copy.series, kind == SearchKind.SERIES) { kind = SearchKind.SERIES }
         }
         // Only worth asking when there is somewhere to ask: without a
         // Jellyseerr, "Requestable" is a filter that can never match
@@ -935,13 +936,13 @@ fun SearchScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.padding(top = 8.dp),
             ) {
-                FilterPill("All", availability == SearchAvailability.ALL) {
+                FilterPill(Copy.all, availability == SearchAvailability.ALL) {
                     availability = SearchAvailability.ALL
                 }
-                FilterPill("On the server", availability == SearchAvailability.ON_SERVER) {
+                FilterPill(Copy.onTheServer, availability == SearchAvailability.ON_SERVER) {
                     availability = SearchAvailability.ON_SERVER
                 }
-                FilterPill("Requestable", availability == SearchAvailability.REQUESTABLE) {
+                FilterPill(Copy.requestable, availability == SearchAvailability.REQUESTABLE) {
                     availability = SearchAvailability.REQUESTABLE
                 }
             }
@@ -1083,9 +1084,9 @@ private fun SearchHitRow(
             Icon(
                 if (inWatchlist) Icons.Default.Check else Icons.Default.Add,
                 contentDescription = if (inWatchlist) {
-                    "Remove from watchlist"
+                    Copy.removeWatchlist
                 } else {
-                    "Add to watchlist"
+                    Copy.addWatchlist
                 },
                 tint = CinemaColors.TextPrimary,
             )
@@ -1098,8 +1099,8 @@ private fun SearchHitRow(
 }
 
 private fun downloadLabel(state: DownloadState): String = when (state) {
-    DownloadState.QUEUED -> "Queued for download"
-    DownloadState.DOWNLOADING -> "Downloading…"
-    DownloadState.COMPLETE -> "Available offline"
-    DownloadState.FAILED -> "Download failed — tap Download to retry"
+    DownloadState.QUEUED -> Copy.queuedDownload
+    DownloadState.DOWNLOADING -> Copy.downloading
+    DownloadState.COMPLETE -> Copy.offlineAvailable
+    DownloadState.FAILED -> Copy.downloadFailedRetry
 }

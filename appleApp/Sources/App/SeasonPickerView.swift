@@ -56,7 +56,7 @@ struct SeasonPickerView: View {
                     // it — season 0 excluded on both sides, so the button
                     // and the rows below promise the same thing
                     Button(action: onRequestAll) {
-                        Text("All seasons").font(.headline)
+                        Text(Copy.shared.allSeasons).font(.headline)
                     }
 
                     ForEach(details.requestableSeasons, id: \.seasonNumber) { season in
@@ -79,9 +79,9 @@ struct SeasonPickerView: View {
                 // An unreachable Jellyseerr degrades to a screen that says
                 // so and lets you leave — never an alert over a dead list
                 Section {
-                    Text("Couldn't load seasons for \(showTitle).")
+                    Text(Copy.shared.couldntLoadSeasons(title: showTitle))
                         .foregroundStyle(.secondary)
-                    Button("Back") { dismiss() }
+                    Button(Copy.shared.back) { dismiss() }
                 }
             }
         }
@@ -105,16 +105,16 @@ struct SeasonPickerView: View {
             switch outcome {
             case is RequestOutcome.Sent:
                 justRequested[Int(number)] = .pending
-                notice = "Requested \(showTitle) season \(number)"
+                notice = Copy.shared.requestedSeason(title: showTitle, n: number)
             case is RequestOutcome.AlreadyRequested:
                 justRequested[Int(number)] = .pending
-                notice = "Season \(number) was already requested"
+                notice = Copy.shared.seasonAlreadyRequested(n: number)
             case is RequestOutcome.NotSignedIn:
-                notice = "Sign in to Jellyseerr again in Settings"
+                notice = Copy.shared.signInSeerrAgain
             case let failure as RequestOutcome.Failed:
                 notice = failure.message
             default:
-                notice = "Could not reach Jellyseerr"
+                notice = Copy.shared.couldNotReachSeerr
             }
         }
     }
@@ -145,7 +145,7 @@ private struct SeasonRow: View {
                 // Kotlin Int? bridges as KotlinInt — interpolating the box
                 // itself would print an object, not a number
                 if let count = season.episodeCount {
-                    Text("\(count.intValue) episodes")
+                    Text(Copy.shared.episodesCount(n: Int32(count.intValue)))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

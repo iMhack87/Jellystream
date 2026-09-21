@@ -138,7 +138,7 @@ data class PlaybackStats(
      * missing HDR or a bitrate does not print a blank row.
      */
     fun lines(): List<String> = buildList {
-        add(playMethod)
+        add(if (isTranscode) Copy.transcode else Copy.directPlay)
         val video = listOfNotNull(
             videoCodec?.uppercase(),
             resolution(),

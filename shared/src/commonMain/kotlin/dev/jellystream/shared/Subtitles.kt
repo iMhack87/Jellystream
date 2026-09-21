@@ -26,10 +26,10 @@ enum class SubtitleMode {
     /** How the mode reads in a settings row, same words on every platform. */
     val label: String
         get() = when (this) {
-            OFF -> "Off"
-            FORCED_ONLY -> "Forced only"
-            SMART -> "Smart"
-            ALWAYS -> "Always on"
+            OFF -> Copy.off
+            FORCED_ONLY -> Copy.forcedOnly
+            SMART -> Copy.smart
+            ALWAYS -> Copy.alwaysOn
         }
 
     companion object {

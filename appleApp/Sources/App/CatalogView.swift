@@ -27,7 +27,7 @@ struct CatalogView: View {
             } else if !loaded {
                 ProgressView()
             } else if items.isEmpty {
-                Text("Nothing in here yet").foregroundStyle(.secondary).padding(24)
+                Text(Copy.shared.nothingInHere).foregroundStyle(.secondary).padding(24)
             } else {
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: 16) {
@@ -84,7 +84,7 @@ struct PersonRow: View {
         let shown = CatalogQuery.shared.actors(people: people)
         if !shown.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Cast").font(.headline).foregroundStyle(.white)
+                Text(Copy.shared.cast).font(.headline).foregroundStyle(.white)
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 14) {
                         ForEach(shown, id: \.id) { person in

@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import dev.jdtech.mpv.MPVLib
 import dev.jellystream.shared.BaseItem
+import dev.jellystream.shared.Copy
 import dev.jellystream.shared.JellyfinApi
 import dev.jellystream.shared.JellyseerrApi
 import dev.jellystream.shared.MediaSegment
@@ -145,7 +146,7 @@ fun MpvPlaybackLayer(
         }
         if (activeSegment != null && !ended) {
             SkipSegmentButton(
-                label = if (activeSegment?.isOutro == true) "Skip Credits" else "Skip Intro",
+                label = if (activeSegment?.isOutro == true) Copy.skipCredits else Copy.skipIntro,
                 onClick = {
                     val segment = activeSegment ?: return@SkipSegmentButton
                     holder?.seekToMs(((segment.endSeconds - plan.startOffsetSeconds) * 1000).toLong())
