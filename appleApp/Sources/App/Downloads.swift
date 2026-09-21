@@ -109,7 +109,8 @@ final class Downloader: NSObject, ObservableObject {
                         try await api.reportPlaybackStopped(
                             itemId: item.itemId,
                             positionTicks: item.positionTicks,
-                            playSessionId: nil
+                            playSessionId: nil,
+                            playMethod: "DirectPlay"
                         )
                         return true
                     } catch {

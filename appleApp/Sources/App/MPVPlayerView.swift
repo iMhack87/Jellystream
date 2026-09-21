@@ -65,6 +65,10 @@ final class PlayerModel: ObservableObject {
     private var tickCount = 0
     /// Lets the server terminate the transcode job on Stopped.
     private var playSessionId: String?
+    /// DirectPlay / Transcode — the dashboard should match what the player did.
+    private var playMethod: String = "DirectPlay"
+    /// Kept for the stats overlay; empty until PlaybackInfo answers.
+    @Published var stats: PlaybackStats = PlaybackStats.companion.Empty
     /// Intro/outro markers in media time (empty when the server has none).
     private var segments: [MediaSegment] = []
     /// HLS transcodes start at the resume point, so mpv's clock is
@@ -154,6 +158,14 @@ final class PlayerModel: ObservableObject {
                 return
             }
             self.playSessionId = plan?.playSessionId
+            self.playMethod = plan?.playMethod ?? "DirectPlay"
+            self.stats = plan?.stats ?? PlaybackStats.companion.Empty
+            let fps = plan?.stats.frameRateValue() ?? 0
+            let preferred = DisplayRefresh.shared.preferredRateValue(frameRate: fps)
+            if preferred > 0 {
+                self.setString("display-fps-override", "\(preferred)")
+                self.setString("video-sync", "display-resample")
+            }
             if plan?.isTranscode == true {
                 // The server already starts the HLS window at the resume
                 // point (StartTimeTicks); seeking again would double-apply
@@ -175,7 +187,8 @@ final class PlayerModel: ObservableObject {
             self.subtitleDefaultPending = true
             try? await self.api.reportPlaybackStart(
                 itemId: self.item.id,
-                playSessionId: plan?.playSessionId
+                playSessionId: plan?.playSessionId,
+                playMethod: plan?.playMethod ?? "DirectPlay"
             )
         }
 
@@ -236,11 +249,12 @@ final class PlayerModel: ObservableObject {
         mpv = nil
         mpv_terminate_destroy(handle)
         // Fire-and-forget: the resume point must survive closing the player
-        Task { [api, item, playSessionId] in
+        Task { [api, item, playSessionId, playMethod] in
             try? await api.reportPlaybackStopped(
                 itemId: item.id,
                 positionTicks: finalTicks,
-                playSessionId: playSessionId
+                playSessionId: playSessionId,
+                playMethod: playMethod
             )
         }
     }
@@ -398,12 +412,13 @@ final class PlayerModel: ObservableObject {
             // Media time (window position + transcode offset), like Android
             let ticks = JellyfinApi.companion.secondsToTicks(seconds: positionOffset + timePos)
             let paused = isPaused
-            Task { [api, item, playSessionId] in
+            Task { [api, item, playSessionId, playMethod] in
                 try? await api.reportPlaybackProgress(
                     itemId: item.id,
                     positionTicks: ticks,
                     isPaused: paused,
-                    playSessionId: playSessionId
+                    playSessionId: playSessionId,
+                    playMethod: playMethod
                 )
             }
         }
@@ -550,6 +565,10 @@ private struct PlayerHost: View {
     /// Seconds before the next episode starts on its own, nil when nothing
     /// is counting. Only ever set while the card has no question of its own.
     @State private var countdown: Int?
+    @State private var showStats = false
+    @State private var showChapters = false
+    @State private var chapters: [ChapterInfo] = []
+    @State private var trickplay: TrickplayInfo?
 
     // Settings arrive as a parameter, not from the environment: the model
     // is built in init, before @Environment is readable, and mpv needs the
@@ -599,6 +618,19 @@ private struct PlayerHost: View {
             }
             #endif
 
+            if showChapters, !chapters.isEmpty {
+                ChapterStrip(
+                    api: model.api,
+                    itemId: model.item.id,
+                    chapters: chapters,
+                    onSeek: { seconds in
+                        model.seek(to: seconds - 0)
+                        showChapters = false
+                    },
+                    onClose: { showChapters = false }
+                )
+            }
+
             // There is a next episode to play, or a next season Jellyseerr
             // could go and get, or both. Raised only when the file actually
             // runs out — and only when an advisor found something, so an
@@ -606,6 +638,30 @@ private struct PlayerHost: View {
             if showOffer, hasEndCard {
                 endCard(next: model.nextEpisodeOffer, season: model.nextSeasonOffer)
             }
+
+            #if os(tvOS)
+            if !showTracks && !showOffer {
+                HStack(spacing: 20) {
+                    Button("Info") { showStats.toggle() }
+                    if !chapters.isEmpty {
+                        Button("Chapters") { showChapters.toggle() }
+                    }
+                }
+                .padding(28)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            }
+            if showStats {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(model.stats.lines(), id: \.self) { line in
+                        Text(line).font(.caption.monospaced()).foregroundStyle(.white)
+                    }
+                }
+                .padding(14)
+                .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 10))
+                .padding(28)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+            #endif
         }
         .animation(.easeInOut(duration: 0.25), value: model.skipSegment == nil)
         // Two empty advisors mean today's behaviour: the file ends, nothing
@@ -621,7 +677,11 @@ private struct PlayerHost: View {
             // Menu closes whatever sits on top of the video, innermost
             // first. Quitting the player instead would throw the viewer out
             // of the episode for pressing the one obvious "go back" key.
-            if showOffer {
+            if showChapters {
+                showChapters = false
+            } else if showStats {
+                showStats = false
+            } else if showOffer {
                 dismissOffer()
             } else if showTracks {
                 showTracks = false
@@ -650,6 +710,12 @@ private struct PlayerHost: View {
         }
         #endif
         .onDisappear { model.shutdown() }
+        .task {
+            if let full = try? await model.api.getItem(itemId: model.item.id) {
+                chapters = full.chapterList()
+                trickplay = Trickplay.shared.pick(manifest: full.trickplay, sourceId: nil)
+            }
+        }
     }
 
     private var playbackLayer: some View {
@@ -679,6 +745,37 @@ private struct PlayerHost: View {
                             .foregroundStyle(.white.opacity(0.7))
                     }
                     Spacer()
+                    Button {
+                        showStats.toggle()
+                    } label: {
+                        Image(systemName: "info.circle")
+                            .font(.title2)
+                            .foregroundStyle(.white.opacity(0.8))
+                    }
+                    if !chapters.isEmpty {
+                        Button {
+                            showChapters.toggle()
+                        } label: {
+                            Image(systemName: "list.bullet")
+                                .font(.title2)
+                                .foregroundStyle(.white.opacity(0.8))
+                        }
+                    }
+                    #if !os(tvOS)
+                    AirPlayLaunchButton(model: model)
+                    #endif
+                }
+                if showStats {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(model.stats.lines(), id: \.self) { line in
+                                Text(line).font(.caption.monospaced()).foregroundStyle(.white)
+                            }
+                        }
+                        .padding(10)
+                        .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 10))
+                        Spacer()
+                    }
                 }
                 Spacer()
                 controls
@@ -1259,3 +1356,118 @@ private struct SubtitleDelayRow: View {
     }
 }
 #endif
+
+private struct ChapterStrip: View {
+    let api: JellyfinApi
+    let itemId: String
+    let chapters: [ChapterInfo]
+    let onSeek: (Double) -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Chapters").font(.headline).foregroundStyle(.white)
+                Spacer()
+                Button("Close", action: onClose)
+            }
+            .padding(.horizontal, 20)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(Array(chapters.enumerated()), id: \.offset) { index, chapter in
+                        Button {
+                            onSeek(chapter.startSeconds)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 6) {
+                                AsyncImage(
+                                    url: api.chapterImageUrl(
+                                        itemId: itemId,
+                                        index: Int32(index),
+                                        tag: chapter.imageTag,
+                                        maxWidth: 280
+                                    ).flatMap(URL.init(string:))
+                                ) { image in
+                                    image.resizable().scaledToFill()
+                                } placeholder: {
+                                    Rectangle().fill(Color.white.opacity(0.12))
+                                }
+                                .frame(width: 140, height: 80)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                Text(chapter.name ?? "Chapter \(index + 1)")
+                                    .font(.caption)
+                                    .foregroundStyle(.white)
+                                    .lineLimit(2)
+                            }
+                            .frame(width: 140)
+                        }
+                        #if os(tvOS)
+                        .buttonStyle(.borderless)
+                        #else
+                        .buttonStyle(.plain)
+                        #endif
+                    }
+                }
+                .padding(.horizontal, 20)
+            }
+        }
+        .padding(.vertical, 16)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+    }
+}
+
+#if !os(tvOS)
+import AVKit
+
+/// Opens the system player on an HLS transcode so AirPlay can take the
+/// picture. mpv cannot AirPlay video; AVPlayer can, and the original file
+/// stays Direct Play on this device until this button is pressed.
+private struct AirPlayLaunchButton: View {
+    @ObservedObject var model: PlayerModel
+    @State private var busy = false
+
+    var body: some View {
+        Button {
+            Task { await start() }
+        } label: {
+            Image(systemName: busy ? "progress.indicator" : "airplayvideo")
+                .font(.title2)
+                .foregroundStyle(.white.opacity(0.8))
+        }
+        .disabled(busy)
+    }
+
+    @MainActor
+    private func start() async {
+        busy = true
+        defer { busy = false }
+        model.togglePause()
+        guard let plan = try? await model.api.getPlaybackPlan(
+            item: model.item,
+            forceTranscode: true
+        ) else { return }
+        let urlString = model.api.headerlessUrl(plan: plan) ?? plan.url
+        guard let url = URL(string: urlString) else { return }
+        var headers: [String: String] = [:]
+        if let auth = model.api.streamAuthorizationHeader() {
+            headers["Authorization"] = auth
+        }
+        let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
+        let player = AVPlayer(playerItem: AVPlayerItem(asset: asset))
+        let controller = AVPlayerViewController()
+        controller.player = player
+        controller.allowsPictureInPicturePlayback = true
+        player.play()
+        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let root = scene.keyWindow?.rootViewController
+                ?? scene.windows.first?.rootViewController else { return }
+        var presenter = root
+        while let shown = presenter.presentedViewController {
+            presenter = shown
+        }
+        presenter.present(controller, animated: true)
+    }
+}
+#endif
+

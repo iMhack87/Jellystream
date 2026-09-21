@@ -29,6 +29,8 @@ targets:
       properties:
         CFBundleDisplayName: Jellystream
         UILaunchScreen: {}
+        UIBackgroundModes:
+          - audio
         # Self-hosted Jellyfin servers are frequently plain http on the LAN
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true

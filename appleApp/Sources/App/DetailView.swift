@@ -65,7 +65,57 @@ struct DetailView: View {
 
                     RatingsRow(ratings: item.ratings)
 
-                    if let genres = item.genres, !genres.isEmpty {
+                    let chips = item.genreIdList()
+                    if !chips.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(chips, id: \.id) { genre in
+                                    if let id = genre.id {
+                                        NavigationLink(value: BaseItem(
+                                            id: id,
+                                            name: genre.name,
+                                            type: "Genre",
+                                            collectionType: nil,
+                                            productionYear: nil,
+                                            imageTags: nil,
+                                            seriesName: nil,
+                                            seriesId: nil,
+                                            userData: nil,
+                                            overview: nil,
+                                            runTimeTicks: nil,
+                                            genres: nil,
+                                            communityRating: nil,
+                                            criticRating: nil,
+                                            officialRating: nil,
+                                            indexNumber: nil,
+                                            parentIndexNumber: nil,
+                                            backdropImageTags: nil,
+                                            parentBackdropItemId: nil,
+                                            parentBackdropImageTags: nil,
+                                            premiereDate: nil,
+                                            providerIds: nil,
+                                            people: nil,
+                                            genreItems: nil,
+                                            chapters: nil,
+                                            trickplay: nil,
+                                            primaryImageTag: nil
+                                        )) {
+                                            Text(genre.name ?? "")
+                                                .font(.caption)
+                                                .padding(.horizontal, 12)
+                                                .padding(.vertical, 6)
+                                                .background(Color.white.opacity(0.12), in: Capsule())
+                                        }
+                                        #if os(tvOS)
+                                        .buttonStyle(.borderless)
+                                        #else
+                                        .buttonStyle(.plain)
+                                        #endif
+                                    }
+                                }
+                            }
+                        }
+                    } else if let genres = item.genres, !genres.isEmpty {
                         Text(genres.joined(separator: " · "))
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -122,6 +172,11 @@ struct DetailView: View {
                             .font(.body)
                             .foregroundStyle(.white.opacity(0.9))
                             .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    let cast = item.castList()
+                    if !cast.isEmpty {
+                        PersonRow(api: api, people: cast)
                     }
                 }
                 .padding(.horizontal, 24)

@@ -47,4 +47,7 @@ dependencies {
     // FFmpeg audio decoders (TrueHD, DTS, …) — Jellyfin's published build of
     // Media3's ffmpeg extension; version must track the media3 version
     implementation(libs.media3.ffmpeg.decoder)
+    implementation(libs.libmpv)
+    implementation(libs.play.services.cast)
+    implementation(libs.androidx.appcompat)
 }

@@ -173,6 +173,7 @@ fun DetailScreen(
     api: JellyfinApi,
     item: BaseItem,
     onPlay: (BaseItem) -> Unit,
+    onOpen: (BaseItem) -> Unit = {},
     onBack: () -> Unit,
     watchlist: Watchlist = Watchlist(),
     onWatchlistChange: (Watchlist) -> Unit = {},
@@ -294,12 +295,42 @@ fun DetailScreen(
 
             RatingsRow(full.ratings)
 
-            full.genres?.takeIf { it.isNotEmpty() }?.let {
-                Text(
-                    it.joinToString(" · "),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = CinemaColors.TextSecondary,
-                )
+            val genreChips = full.genreItems?.filter { !it.id.isNullOrBlank() }.orEmpty()
+            if (genreChips.isNotEmpty()) {
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    genreChips.forEach { genre ->
+                        Text(
+                            genre.name ?: "",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = CinemaColors.TextPrimary,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(CinemaColors.SurfaceVariant)
+                                .dpadFocusEffect(RoundedCornerShape(20.dp))
+                                .clickable {
+                                    onOpen(
+                                        BaseItem(
+                                            id = genre.id!!,
+                                            name = genre.name,
+                                            type = "Genre",
+                                        ),
+                                    )
+                                }
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                        )
+                    }
+                }
+            } else {
+                full.genres?.takeIf { it.isNotEmpty() }?.let {
+                    Text(
+                        it.joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = CinemaColors.TextSecondary,
+                    )
+                }
             }
 
             Button(
@@ -404,6 +435,10 @@ fun DetailScreen(
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.fillMaxWidth(),
                 )
+            }
+
+            full.people?.takeIf { it.isNotEmpty() }?.let { people ->
+                PersonRow(api = api, people = people, onOpen = onOpen)
             }
         }
         }

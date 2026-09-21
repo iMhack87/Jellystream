@@ -172,7 +172,7 @@ class Downloader(
             val downloads = store.load()
             downloads.unsyncedPositions.forEach { item ->
                 val ok = runCatching {
-                    api.reportPlaybackStopped(item.itemId, item.positionTicks, null)
+                    api.reportPlaybackStopped(item.itemId, item.positionTicks, null, "DirectPlay")
                 }.isSuccess
                 if (ok) publish(store.load().markSynced(item.itemId))
             }

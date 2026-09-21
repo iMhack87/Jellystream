@@ -134,6 +134,7 @@ private sealed interface Screen {
     data object Home : Screen
     data class Detail(val item: BaseItem) : Screen
     data class Series(val item: BaseItem) : Screen
+    data class Catalog(val item: BaseItem) : Screen
     data object Search : Screen
     data object Settings : Screen
     data object Requests : Screen
@@ -381,6 +382,7 @@ private fun SignedInApp(
     fun open(item: BaseItem) {
         when {
             item.isSeries -> backStack.add(Screen.Series(item))
+            item.isBoxSet || item.isPerson || item.isGenre -> backStack.add(Screen.Catalog(item))
             item.isPlayable -> backStack.add(Screen.Detail(item))
         }
     }
@@ -419,6 +421,7 @@ private fun SignedInApp(
                     api,
                     screen.item,
                     onPlay = { playing = it },
+                    onOpen = ::open,
                     onBack = ::goBack,
                     watchlist = watchlist,
                     onWatchlistChange = ::changeWatchlist,
@@ -429,6 +432,12 @@ private fun SignedInApp(
                             downloader.start(screen.item, api.containerOf(screen.item))
                         }
                     },
+                )
+                is Screen.Catalog -> CatalogScreen(
+                    api = api,
+                    item = screen.item,
+                    onOpen = ::open,
+                    onBack = ::goBack,
                 )
                 is Screen.Series -> SeriesScreen(
                     api,
@@ -856,6 +865,12 @@ private fun HomeScreen(
             runCatching { api.getNextUp(12) }.getOrDefault(emptyList())
                 .takeIf { it.isNotEmpty() }
                 ?.let { result.add(LibrarySection("Next Up", "nextup", it)) }
+            runCatching { api.getCollections(24) }.getOrDefault(emptyList())
+                .takeIf { it.isNotEmpty() }
+                ?.let { result.add(LibrarySection("Collections", "collections", it)) }
+            runCatching { api.getGenres("", 24) }.getOrDefault(emptyList())
+                .takeIf { it.isNotEmpty() }
+                ?.let { result.add(LibrarySection("Genres", "genres", it)) }
             settings.visibleLibraries(api.getUserViews()).forEach { view ->
                 // One failing view must not blank the whole home screen
                 val latest = runCatching { api.getLatestItems(view.id, 12) }
@@ -1225,7 +1240,7 @@ private fun ContinueRow(api: JellyfinApi, section: LibrarySection, onOpen: (Base
                     modifier = Modifier
                         .width(248.dp)
                         .dpadFocusEffect()
-                        .clickable(enabled = item.isPlayable || item.isSeries) { onOpen(item) },
+                        .clickable(enabled = item.isBrowsable) { onOpen(item) },
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Box(
@@ -1441,7 +1456,7 @@ private fun PosterCard(api: JellyfinApi, item: BaseItem, onOpen: (BaseItem) -> U
             .clip(RoundedCornerShape(10.dp))
             .background(CinemaColors.SurfaceVariant)
             .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
-            .clickable(enabled = item.isPlayable || item.isSeries) { onOpen(item) },
+            .clickable(enabled = item.isBrowsable) { onOpen(item) },
     ) {
         AsyncImage(
             model = api.imageUrl(item, 400),

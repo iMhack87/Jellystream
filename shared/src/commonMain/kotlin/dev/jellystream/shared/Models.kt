@@ -208,6 +208,25 @@ data class BaseItem(
      * it out of the DTO unless it is named in `fields`.
      */
     @SerialName("ProviderIds") val providerIds: Map<String, String>? = null,
+    /** Cast and crew — only on a single-item fetch with `fields=People`. */
+    @SerialName("People") val people: List<PersonCredit>? = null,
+    /**
+     * Genres with ids, so a tap can open that genre. [genres] is names
+     * only; list DTOs often have those and not these.
+     */
+    @SerialName("GenreItems") val genreItems: List<NameId>? = null,
+    /** Chapter markers — `fields=Chapters` on a single-item fetch. */
+    @SerialName("Chapters") val chapters: List<ChapterInfo>? = null,
+    /**
+     * Trickplay sprite sheets, keyed first by media source id then by
+     * thumbnail width. `fields=Trickplay`.
+     */
+    @SerialName("Trickplay") val trickplay: Map<String, Map<String, TrickplayInfo>>? = null,
+    /**
+     * Person DTOs put the headshot tag here rather than in [imageTags].
+     * Movies still use ImageTags.Primary.
+     */
+    @SerialName("PrimaryImageTag") val primaryImageTag: String? = null,
 ) {
     /** "yyyy-MM-dd" air date, null when the server didn't send one. */
     val premiereDateIso: String?
@@ -292,6 +311,28 @@ data class BaseItem(
     val isSeries: Boolean
         get() = type == "Series"
 
+    val isBoxSet: Boolean
+        get() = type == "BoxSet"
+
+    val isPerson: Boolean
+        get() = type == "Person"
+
+    val isGenre: Boolean
+        get() = type == "Genre"
+
+    /**
+     * Anything a tap should open rather than ignore. Box sets, people and
+     * genres used to be dead clicks on a library row.
+     */
+    val isBrowsable: Boolean
+        get() = isPlayable || isSeries || isBoxSet || isPerson || isGenre
+
+    fun castList(): List<PersonCredit> = CatalogQuery.actors(people.orEmpty())
+
+    fun chapterList(): List<ChapterInfo> = chapters.orEmpty()
+
+    fun genreIdList(): List<NameId> = genreItems.orEmpty().filter { !it.id.isNullOrBlank() }
+
     /** Whole minutes, null when the server didn't send a runtime. */
     val runtimeMinutes: Int?
         get() = runTimeTicks?.let { (it / (60 * JellyfinApi.TICKS_PER_SECOND)).toInt() }
@@ -334,12 +375,24 @@ data class MediaStream(
     @SerialName("IsDefault") val isDefault: Boolean = false,
     /** SDH / CC — carries sound descriptions most viewers do not want by default. */
     @SerialName("IsHearingImpaired") val isHearingImpaired: Boolean = false,
+    @SerialName("BitRate") val bitRate: Int? = null,
+    @SerialName("Width") val width: Int? = null,
+    @SerialName("Height") val height: Int? = null,
+    @SerialName("AverageFrameRate") val averageFrameRate: Double? = null,
+    @SerialName("VideoRange") val videoRange: String? = null,
+    @SerialName("VideoRangeType") val videoRangeType: String? = null,
+    @SerialName("Channels") val channels: Int? = null,
+    @SerialName("Profile") val profile: String? = null,
+    @SerialName("BitDepth") val bitDepth: Int? = null,
 ) {
     val isSubtitle: Boolean
         get() = type == "Subtitle"
 
     val isAudio: Boolean
         get() = type == "Audio"
+
+    val isVideo: Boolean
+        get() = type == "Video"
 }
 
 @Serializable
@@ -349,6 +402,7 @@ data class MediaSourceInfo(
     @SerialName("SupportsDirectPlay") val supportsDirectPlay: Boolean = true,
     @SerialName("TranscodingUrl") val transcodingUrl: String? = null,
     @SerialName("MediaStreams") val mediaStreams: List<MediaStream>? = null,
+    @SerialName("Bitrate") val bitrate: Int? = null,
 )
 
 @Serializable
@@ -395,7 +449,13 @@ data class PlaybackPlan(
 
     /** Container of the source file, which names a downloaded copy. */
     val container: String? = null,
-)
+
+    /** What is actually playing — codec, HDR, fps — for the stats overlay. */
+    val stats: PlaybackStats = PlaybackStats.Empty,
+) {
+    val playMethod: String
+        get() = if (isTranscode) "Transcode" else "DirectPlay"
+}
 
 @Serializable
 internal data class PlaybackReport(

@@ -250,12 +250,77 @@ class JellyfinApi(
         ).items
     }
 
-    /** Full item details (overview, runtime, genres, …). */
+    /**
+     * Full item details. People, chapters, trickplay and genre ids are
+     * trimmed out of list DTOs the same way ProviderIds is — they have to
+     * be named here or the detail page never sees them.
+     */
     @Throws(Throwable::class)
     suspend fun getItem(itemId: String): BaseItem {
         val s = requireSession()
-        return authGet("Users/${s.userId}/Items/$itemId")
+        return authGet(
+            "Users/${s.userId}/Items/$itemId",
+            "fields" to "People,Chapters,Trickplay,GenreItems,ProviderIds,Overview",
+        )
     }
+
+    /**
+     * A library page: children of a folder, or everything matching a
+     * genre / person / type. Every filter is a string so Swift can call
+     * it without optional-default gymnastics; pass "" to skip one.
+     */
+    @Throws(Throwable::class)
+    suspend fun getLibraryItems(
+        parentId: String,
+        includeItemTypes: String,
+        genreIds: String,
+        personIds: String,
+        recursive: Boolean,
+        limit: Int,
+    ): List<BaseItem> {
+        val s = requireSession()
+        val params = mutableListOf(
+            "recursive" to recursive.toString(),
+            "limit" to limit.toString(),
+            "sortBy" to "SortName",
+            "sortOrder" to "Ascending",
+            "fields" to "ProviderIds,PrimaryImageAspectRatio",
+        )
+        if (parentId.isNotEmpty()) params.add("parentId" to parentId)
+        if (includeItemTypes.isNotEmpty()) params.add("includeItemTypes" to includeItemTypes)
+        if (genreIds.isNotEmpty()) params.add("genreIds" to genreIds)
+        if (personIds.isNotEmpty()) params.add("personIds" to personIds)
+        return authGet<ItemsResult>("Users/${s.userId}/Items", *params.toTypedArray()).items
+    }
+
+    @Throws(Throwable::class)
+    suspend fun getGenres(parentId: String, limit: Int): List<BaseItem> {
+        val s = requireSession()
+        val params = mutableListOf(
+            "userId" to s.userId,
+            "recursive" to "true",
+            "sortBy" to "SortName",
+            "limit" to limit.toString(),
+        )
+        if (parentId.isNotEmpty()) params.add("parentId" to parentId)
+        return try {
+            authGet<ItemsResult>("Genres", *params.toTypedArray()).items
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    @Throws(Throwable::class)
+    suspend fun getCollections(limit: Int): List<BaseItem> = getLibraryItems(
+        parentId = "",
+        includeItemTypes = "BoxSet",
+        genreIds = "",
+        personIds = "",
+        recursive = true,
+        limit = limit,
+    )
 
     @Throws(Throwable::class)
     suspend fun getSeasons(seriesId: String): List<BaseItem> {
@@ -383,40 +448,44 @@ class JellyfinApi(
                 )
             }
 
-        val subtitleStreams = source.mediaStreams.orEmpty().filter { it.isSubtitle }
+        val streams = source.mediaStreams.orEmpty()
+        val subtitleStreams = streams.filter { it.isSubtitle }
         // The audio the server will actually play: its default track, else
         // the first one. Which language it is decides whether the smart
         // default puts full subtitles on.
-        val audioStreams = source.mediaStreams.orEmpty().filter { it.isAudio }
+        val audioStreams = streams.filter { it.isAudio }
         val audioLanguage = (audioStreams.firstOrNull { it.isDefault } ?: audioStreams.firstOrNull())
             ?.language
-
         val transcodingUrl = source.transcodingUrl
-        return if ((!source.supportsDirectPlay || forceTranscode) && transcodingUrl != null) {
-            PlaybackPlan(
-                url = joinUrl(s.baseUrl, transcodingUrl),
-                isTranscode = true,
-                externalSubtitles = subtitles,
-                playSessionId = info.playSessionId,
-                startOffsetSeconds = startTicks / TICKS_PER_SECOND.toDouble(),
-                subtitleStreams = subtitleStreams,
-                audioLanguage = audioLanguage,
-                mediaSourceId = source.id,
-                container = source.container,
-            )
+        val isTranscode = (!source.supportsDirectPlay || forceTranscode) && transcodingUrl != null
+        val url = if (isTranscode) {
+            joinUrl(s.baseUrl, transcodingUrl!!)
         } else {
             val mediaSourceParam = source.id?.let { "&mediaSourceId=$it" } ?: ""
-            PlaybackPlan(
-                url = "${s.baseUrl}/Videos/${item.id}/stream?static=true$mediaSourceParam",
-                isTranscode = false,
-                externalSubtitles = subtitles,
-                playSessionId = info.playSessionId,
-                subtitleStreams = subtitleStreams,
-                audioLanguage = audioLanguage,
-                mediaSourceId = source.id,
-                container = source.container,
-            )
+            "${s.baseUrl}/Videos/${item.id}/stream?static=true$mediaSourceParam"
         }
+        return PlaybackPlan(
+            url = url,
+            isTranscode = isTranscode,
+            externalSubtitles = subtitles,
+            playSessionId = info.playSessionId,
+            startOffsetSeconds = if (isTranscode) startTicks / TICKS_PER_SECOND.toDouble() else 0.0,
+            subtitleStreams = subtitleStreams,
+            audioLanguage = audioLanguage,
+            mediaSourceId = source.id,
+            container = source.container,
+            stats = PlaybackStats.of(isTranscode, source.container, streams, source.bitrate),
+        )
+    }
+
+    /**
+     * The same plan, but the URL a headerless client (Chromecast, AirPlay
+     * AVPlayer in some configurations) can fetch. The token rides in the
+     * query string — only for that hop, never for the on-device player.
+     */
+    fun headerlessUrl(plan: PlaybackPlan): String? {
+        val token = session?.accessToken ?: return null
+        return RemotePlayback.appendApiKey(plan.url, token)
     }
 
     /**
@@ -580,17 +649,38 @@ class JellyfinApi(
     /** Primary image URL for an item, or null if the item has none. */
     fun imageUrl(item: BaseItem, maxWidth: Int = 400): String? {
         val s = session ?: return null
-        val tag = item.imageTags?.get("Primary") ?: return null
+        val tag = item.imageTags?.get("Primary") ?: item.primaryImageTag ?: return null
         return "${s.baseUrl}/Items/${item.id}/Images/Primary?maxWidth=$maxWidth&tag=$tag"
+    }
+
+    fun personImageUrl(person: PersonCredit, maxWidth: Int): String? {
+        val s = session ?: return null
+        val id = person.id ?: return null
+        val tag = person.primaryImageTag ?: return null
+        return "${s.baseUrl}/Items/$id/Images/Primary?maxWidth=$maxWidth&tag=$tag"
+    }
+
+    fun chapterImageUrl(itemId: String, index: Int, tag: String?, maxWidth: Int): String? {
+        val s = session ?: return null
+        val tagged = tag?.let { "&tag=$it" } ?: ""
+        return "${s.baseUrl}/Items/$itemId/Images/Chapter/$index?maxWidth=$maxWidth$tagged"
+    }
+
+    fun trickplayTileUrl(itemId: String, width: Int, index: Int): String? {
+        val s = session ?: return null
+        return "${s.baseUrl}/${Trickplay.tilePath(itemId, width, index)}"
     }
 
     /** Tells the server playback started — enables "continue watching". */
     @Throws(Throwable::class)
-    suspend fun reportPlaybackStart(itemId: String, playSessionId: String? = null) =
-        postPlaybackReport(
-            "Sessions/Playing",
-            PlaybackReport(itemId, playSessionId = playSessionId),
-        )
+    suspend fun reportPlaybackStart(
+        itemId: String,
+        playSessionId: String?,
+        playMethod: String,
+    ) = postPlaybackReport(
+        "Sessions/Playing",
+        PlaybackReport(itemId, playSessionId = playSessionId, playMethod = playMethod),
+    )
 
     /** Periodic position update (Jellyfin ticks: 1 s = 10_000_000). */
     @Throws(Throwable::class)
@@ -598,10 +688,11 @@ class JellyfinApi(
         itemId: String,
         positionTicks: Long,
         isPaused: Boolean,
-        playSessionId: String? = null,
+        playSessionId: String?,
+        playMethod: String,
     ) = postPlaybackReport(
         "Sessions/Playing/Progress",
-        PlaybackReport(itemId, positionTicks, isPaused, playSessionId = playSessionId),
+        PlaybackReport(itemId, positionTicks, isPaused, playMethod, playSessionId),
     )
 
     /**
@@ -612,10 +703,11 @@ class JellyfinApi(
     suspend fun reportPlaybackStopped(
         itemId: String,
         positionTicks: Long,
-        playSessionId: String? = null,
+        playSessionId: String?,
+        playMethod: String,
     ) = postPlaybackReport(
         "Sessions/Playing/Stopped",
-        PlaybackReport(itemId, positionTicks, playSessionId = playSessionId),
+        PlaybackReport(itemId, positionTicks, playMethod = playMethod, playSessionId = playSessionId),
     )
 
     /**

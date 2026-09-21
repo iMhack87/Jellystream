@@ -88,7 +88,8 @@ struct HomeView: View {
                             indexNumber: nil, parentIndexNumber: nil,
                             backdropImageTags: nil, parentBackdropItemId: nil,
                             parentBackdropImageTags: nil, premiereDate: nil,
-                            providerIds: nil
+                            providerIds: nil, people: nil, genreItems: nil,
+                            chapters: nil, trickplay: nil, primaryImageTag: nil
                         ),
                         settings: settings,
                         // Offline: this synthetic BaseItem is a "Movie" with
@@ -296,6 +297,12 @@ struct HomeView: View {
             if let nextUp = try? await api.getNextUp(limit: 12), !nextUp.isEmpty {
                 result.append(LibrarySection(title: "Next Up", key: "nextup", items: nextUp))
             }
+            if let collections = try? await api.getCollections(limit: 24), !collections.isEmpty {
+                result.append(LibrarySection(title: "Collections", key: "collections", items: collections))
+            }
+            if let genres = try? await api.getGenres(parentId: "", limit: 24), !genres.isEmpty {
+                result.append(LibrarySection(title: "Genres", key: "genres", items: genres))
+            }
             let views = settings.visibleLibraries(views: try await api.getUserViews())
             for view in views {
                 // One failing view must not blank the whole home screen
@@ -321,6 +328,8 @@ extension View {
         navigationDestination(for: BaseItem.self) { item in
             if item.isSeries {
                 SeriesView(api: api, seerr: seerr, series: item)
+            } else if item.isBoxSet || item.isPerson || item.isGenre {
+                CatalogView(api: api, item: item)
             } else {
                 DetailView(api: api, seerr: seerr, item: item)
             }
@@ -523,7 +532,7 @@ private struct ContinueRow: View {
                             .frame(width: cardWidth)
                             #endif
                         }
-                        .disabled(!item.isPlayable && !item.isSeries)
+                        .disabled(!item.isBrowsable)
                         #if os(tvOS)
                         .buttonStyle(.borderless)
                         #else
@@ -597,7 +606,7 @@ private struct LibraryRow: View {
                                 .hoverEffect(.highlight)
                                 #endif
                         }
-                        .disabled(!item.isPlayable && !item.isSeries)
+                        .disabled(!item.isBrowsable)
                         #if os(tvOS)
                         .buttonStyle(.borderless)
                         #else
