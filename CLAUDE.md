@@ -22,6 +22,8 @@ xcodebuild -project Jellystream.xcodeproj -scheme Jellystream -destination 'gene
 xcodebuild -project Jellystream.xcodeproj -scheme JellystreamTV -destination 'generic/platform=tvOS Simulator' build CODE_SIGNING_ALLOWED=NO # tvOS
 ```
 
+Signature Apple : équipe **B35G5Y85U9** (ZEF Computers, `contact@zefcomputers.com`). TestFlight : créer les apps `dev.jellystream.app` et `dev.jellystream.tv` dans App Store Connect, puis archiver iOS / tvOS (destination *generic iOS/tvOS device*, pas simulateur).
+
 ## Pièges connus
 
 - **Le XCFramework n'est PAS rebuildé par Xcode** : tout changement dans `shared/` exige de relancer `:shared:assembleSharedDebugXCFramework` avant le build Apple, sinon on teste du code périmé.
@@ -75,7 +77,7 @@ Gratuit tant que le dépôt est **public** (minutes illimitées, runner macOS co
 
 ## Signature Apple
 
-Compte `contact@zefcomputers.com`, équipe **B35G5Y85U9** (ZEF Computers). Posée dans `appleApp/project.yml` (`DEVELOPMENT_TEAM`). La CI simulateur reste en `CODE_SIGNING_ALLOWED=NO`.
+Compte `contact@zefcomputers.com`, équipe **B35G5Y85U9** (ZEF Computers). Posée dans `appleApp/project.yml` (`DEVELOPMENT_TEAM`). La CI simulateur reste en `CODE_SIGNING_ALLOWED=NO`. Icônes : `appleApp/Sources/iOS/Assets.xcassets` et `appleApp/Sources/tvOS/Assets.xcassets` ; Android `androidApp/src/main/res/mipmap-*`.
 
 ## Déploiement
 
