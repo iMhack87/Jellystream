@@ -9,6 +9,8 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "5.10"
+    # ZEF Computers — contact@zefcomputers.com (paid Individual team)
+    DEVELOPMENT_TEAM: B35G5Y85U9
     # The shared KMP framework ships arm64-only simulator slices (no Intel)
     "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
     "EXCLUDED_ARCHS[sdk=appletvsimulator*]": x86_64

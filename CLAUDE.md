@@ -72,6 +72,10 @@ xcodebuild -project Jellystream.xcodeproj -scheme JellystreamTV -destination 'ge
 
 Gratuit tant que le dépôt est **public** (minutes illimitées, runner macOS compris). S'il passait en privé : quota de 2 000 min/mois et **une minute macOS en coûte 10** → il faudrait réserver le job Apple à `main` ou au déclenchement manuel.
 
+## Signature Apple
+
+Compte `contact@zefcomputers.com`, équipe **B35G5Y85U9** (ZEF Computers). Posée dans `appleApp/project.yml` (`DEVELOPMENT_TEAM`). La CI simulateur reste en `CODE_SIGNING_ALLOWED=NO`.
+
 ## Déploiement
 
 Aucun pour l'instant (pas de store, pas de CI). Merge sur `main` uniquement via PR approuvée par Matthieu.
